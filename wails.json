@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "evo-harness",
+  "outputfilename": "evo-harness",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build:no-typecheck",
+  "frontend:dev:serverUrl": "http://localhost:34115",
+  "frontend:dir": "./frontend/dist",
+  "wailsjsdir": "./frontend/src",
+  "author": {
+    "name": "CraftFire Team"
+  },
+  "info": {
+    "companyName": "Evo Harness",
+    "productName": "Evo Harness",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026 Evo Harness",
+    "comments": "Evo Harness"
+  }
+}

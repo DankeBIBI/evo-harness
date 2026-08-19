@@ -1,0 +1,18 @@
+{
+  "name": "evo-harness",
+  "version": "1.0.0",
+  "description": "基于 Wails2 + React + TypeScript 构建的跨平台 AI 应用",
+  "private": true,
+  "scripts": {
+    "dev": "node frontend/dev.mjs",
+    "build": "wails build",
+    "build:production": "wails build -platform windows/amd64",
+    "dev:web": "cd frontend && pnpm dev",
+    "dev:backend": "wails dev -skipfrontend",
+    "generate": "wails generate module",
+    "update": "wails update"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

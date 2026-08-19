@@ -1,0 +1,496 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	:root {
+		/* ---- 莫兰迪配色（Morandi） ---- */
+		--background: 40 18% 97%;
+		--foreground: 30 12% 20%;
+		--card: 40 14% 99%;
+		--card-foreground: 30 12% 20%;
+		--popover: 40 14% 99%;
+		--popover-foreground: 30 12% 20%;
+		/* 主色：灰调玫瑰（dusty rose）—— 加深以提高白色文字对比度 */
+		--primary: 350 30% 45%;
+		--primary-foreground: 0 0% 100%;
+		/* 次要：暖灰绿（sage） */
+		--secondary: 120 12% 88%;
+		--secondary-foreground: 120 15% 25%;
+		/* 柔和灰调 */
+		--muted: 35 14% 93%;
+		--muted-foreground: 30 8% 48%;
+		/* 强调：灰调杏（muted apricot） */
+		--accent: 30 20% 88%;
+		--accent-foreground: 30 20% 25%;
+		/* 危险色 */
+		--destructive: 0 55% 55%;
+		--destructive-foreground: 0 0% 98%;
+		/* 边框/输入 */
+		--border: 30 12% 85%;
+		--input: 30 12% 85%;
+		/* 焦点环 */
+		--ring: 350 20% 58%;
+		--radius: 0.5rem;
+		/* 语义色 */
+		--success: 145 35% 42%;
+		--success-foreground: 0 0% 100%;
+		--warning: 40 50% 48%;
+		--warning-foreground: 0 0% 100%;
+
+		/* ---- 侧边栏 ---- */
+		--sidebar: 40 14% 96%;
+		--sidebar-foreground: 30 12% 28%;
+		--sidebar-accent: 35 14% 90%;
+		--sidebar-accent-foreground: 30 12% 20%;
+		--sidebar-border: 30 10% 82%;
+		--sidebar-ring: 350 20% 58%;
+
+		/* ---- 设计令牌（用户可调） ---- */
+		--font-size-base: 14;
+		--icon-size-base: 18;
+		--font-weight-base: 500;
+		/* 标题副标题间距：默认 1.25rem (20px) */
+		--heading-gap: 1.25rem;
+
+		/* ---- Material Web Design Tokens(2026-08-17 引入)----
+		 * 映射 Material Design 3 颜色 token 到项目 HSL 变量,
+		 * 设置弹窗中可使用 <md-icon> / <md-text-button> 等组件自动应用此配色
+		 */
+		--md-sys-color-primary: hsl(var(--primary));
+		--md-sys-color-on-primary: hsl(var(--primary-foreground));
+		--md-sys-color-surface: hsl(var(--card));
+		--md-sys-color-on-surface: hsl(var(--card-foreground));
+		--md-sys-color-surface-container: hsl(var(--muted));
+		--md-sys-color-on-surface-variant: hsl(var(--muted-foreground));
+		--md-sys-color-outline: hsl(var(--border));
+		--md-sys-color-outline-variant: hsl(var(--border));
+		--md-sys-color-error: hsl(var(--destructive));
+		--md-sys-color-on-error: hsl(var(--destructive-foreground));
+	}
+
+	/* 页面标题 */
+	h1, h2, h3, h4 {
+		font-weight: var(--font-weight-base);
+		margin-bottom: var(--heading-gap);
+	}
+
+	/* 标题后的副标题/描述 */
+	h1 + p, h2 + p, h3 + p, h4 + p {
+		margin-top: 0;
+		margin-bottom: var(--heading-gap);
+	}
+
+	h1 { font-size: calc(var(--font-size-base) / 16 * 1.5rem + 0.125rem); }
+	h2 { font-size: calc(var(--font-size-base) / 16 * 1.25rem + 0.125rem); }
+	h3 { font-size: calc(var(--font-size-base) / 16 * 1.1rem + 0.125rem); }
+	h4 { font-size: calc(var(--font-size-base) / 16 * 1rem + 0.0625rem); }
+
+	/* 卡片标题 */
+	.card-title {
+		font-weight: var(--font-weight-base);
+	}
+
+	/* 按钮样式补丁：字体大小使用令牌 */
+	button, .btn {
+		font-size: calc(var(--font-size-base) / 16 * 1rem);
+		font-weight: var(--font-weight-base);
+	}
+
+	/* 徽章样式补丁 */
+	.badge, [class*="badge"] {
+		font-size: calc(var(--font-size-base) / 16 * 0.85rem);
+		font-weight: var(--font-weight-base);
+	}
+
+	/* 输入框样式补丁 */
+	input[type="text"],
+	input[type="email"],
+	input[type="password"],
+	input[type="number"],
+	textarea {
+		font-size: calc(var(--font-size-base) / 16 * 1rem);
+	}
+
+	/* 段落和正文使用字体大小令牌 */
+	p, span, div, li, td, th {
+		font-size: calc(var(--font-size-base) / 16 * 1rem);
+	}
+
+	/* 小字使用更小的尺寸 */
+	.text-xs, .text-sm {
+		font-size: calc(var(--font-size-base) / 16 * 0.85rem);
+	}
+
+	/* 图标大小补丁：lucide 图标使用令牌 */
+	[data-lucide],
+	[class*="lucide"] {
+		width: calc(var(--icon-size-base) / 16 * 1rem);
+		height: calc(var(--icon-size-base) / 16 * 1rem);
+	}
+}
+
+	.dark {
+		/* ---- 深色莫兰迪 ---- */
+		--background: 35 10% 10%;
+		--foreground: 35 18% 90%;
+		--card: 35 10% 14%;
+		--card-foreground: 35 18% 90%;
+		--popover: 35 10% 14%;
+		--popover-foreground: 35 18% 90%;
+		--primary: 350 25% 45%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 120 10% 22%;
+		--secondary-foreground: 120 10% 78%;
+		--muted: 35 8% 22%;
+		--muted-foreground: 35 8% 65%;
+		--accent: 30 12% 24%;
+		--accent-foreground: 30 12% 82%;
+		--destructive: 0 50% 40%;
+		--destructive-foreground: 0 0% 98%;
+		--border: 35 8% 22%;
+		--input: 35 8% 22%;
+		--ring: 350 25% 45%;
+		--success: 145 35% 38%;
+		--success-foreground: 0 0% 100%;
+		--warning: 40 45% 45%;
+		--warning-foreground: 0 0% 100%;
+
+		/* ---- 侧边栏深色 ---- */
+		--sidebar: 35 10% 13%;
+		--sidebar-foreground: 35 15% 82%;
+		--sidebar-accent: 35 8% 22%;
+		--sidebar-accent-foreground: 35 15% 90%;
+		--sidebar-border: 35 8% 20%;
+		--sidebar-ring: 350 20% 52%;
+	}
+
+	/** Lowpoly 主题变量覆盖 */
+	html.theme-lowpoly {
+		--background: 202 59% 14%;
+		--foreground: 30 100% 97%;
+		--card: 203 53% 20%;
+		--card-foreground: 30 100% 97%;
+		--popover: 203 53% 20%;
+		--popover-foreground: 30 100% 97%;
+		--primary: 330 100% 65%;
+		--primary-foreground: 30 100% 97%;
+		--secondary: 43 100% 62%;
+		--secondary-foreground: 202 59% 14%;
+		--muted: 203 40% 25%;
+		--muted-foreground: 30 40% 75%;
+		--accent: 7 100% 68%;
+		--accent-foreground: 30 100% 97%;
+		--destructive: 0 84.2% 60.2%;
+		--destructive-foreground: 30 100% 97%;
+		--border: 203 40% 28%;
+		--input: 203 40% 28%;
+		--ring: 330 100% 65%;
+		--success: 142 71% 45%;
+		--success-foreground: 30 100% 97%;
+		--warning: 38 92% 50%;
+		--warning-foreground: 30 100% 97%;
+	}
+
+	/** Lowpoly 主题硬阴影覆盖（仅针对自定义类，避免影响通用 Tailwind 工具类） */
+	html.theme-lowpoly .shadow-card {
+		box-shadow: 4px 4px 0 0 rgb(0 0 0 / 35%);
+	}
+
+	html.theme-lowpoly .shadow-dialog {
+		box-shadow: 8px 8px 0 0 rgb(0 0 0 / 35%);
+	}
+
+	/** Lowpoly 主题按钮阴影 */
+	html.theme-lowpoly {
+		--shadow-button: 2px 2px 0 rgb(0 0 0 / 30%);
+	}
+
+	/** 田园主题（Pastoral）变量覆盖 */
+	html.theme-pastoral {
+		--background: 40 20% 96%;
+		--foreground: 25 35% 18%;
+		--card: 40 18% 99%;
+		--card-foreground: 25 35% 18%;
+		--popover: 40 18% 99%;
+		--popover-foreground: 25 35% 18%;
+		--primary: 85 45% 30%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 45 75% 50%;
+		--secondary-foreground: 25 35% 12%;
+		--muted: 35 18% 90%;
+		--muted-foreground: 25 12% 45%;
+		--accent: 15 45% 48%;
+		--accent-foreground: 0 0% 100%;
+		--destructive: 0 60% 50%;
+		--destructive-foreground: 0 0% 98%;
+		--border: 35 15% 82%;
+		--input: 35 15% 82%;
+		--ring: 85 45% 30%;
+		--success: 120 40% 42%;
+		--success-foreground: 0 0% 100%;
+		--warning: 40 60% 48%;
+		--warning-foreground: 0 0% 100%;
+
+		--sidebar: 40 16% 94%;
+		--sidebar-foreground: 25 30% 22%;
+		--sidebar-accent: 35 16% 86%;
+		--sidebar-accent-foreground: 25 30% 18%;
+		--sidebar-border: 35 14% 78%;
+		--sidebar-ring: 85 45% 35%;
+	}
+
+	.dark.theme-pastoral {
+		--background: 25 20% 10%;
+		--foreground: 40 18% 88%;
+		--card: 25 18% 13%;
+		--card-foreground: 40 18% 88%;
+		--popover: 25 18% 13%;
+		--popover-foreground: 40 18% 88%;
+		--primary: 85 35% 35%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 45 55% 42%;
+		--secondary-foreground: 40 18% 88%;
+		--muted: 25 12% 22%;
+		--muted-foreground: 25 10% 62%;
+		--accent: 15 35% 38%;
+		--accent-foreground: 0 0% 100%;
+		--destructive: 0 50% 40%;
+		--destructive-foreground: 0 0% 98%;
+		--border: 25 12% 22%;
+		--input: 25 12% 22%;
+		--ring: 85 35% 35%;
+		--success: 120 35% 38%;
+		--success-foreground: 0 0% 100%;
+		--warning: 40 55% 42%;
+		--warning-foreground: 0 0% 100%;
+
+		--sidebar: 25 18% 12%;
+		--sidebar-foreground: 40 16% 80%;
+		--sidebar-accent: 25 12% 22%;
+		--sidebar-accent-foreground: 40 16% 88%;
+		--sidebar-border: 25 12% 20%;
+		--sidebar-ring: 85 35% 40%;
+	}
+
+	/** Liquid Glass 主题变量覆盖 - 毛玻璃效果 */
+	html.theme-liquid-glass {
+		--background: 240 20% 98%;
+		--foreground: 245 30% 15%;
+		--card: 240 15% 95%;
+		--card-foreground: 245 30% 15%;
+		--popover: 240 10% 96%;
+		--popover-foreground: 245 30% 15%;
+		--primary: 245 65% 55%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 260 65% 65%;
+		--secondary-foreground: 0 0% 100%;
+		--muted: 240 10% 90%;
+		--muted-foreground: 245 10% 45%;
+		--accent: 265 75% 60%;
+		--accent-foreground: 0 0% 100%;
+		--destructive: 0 60% 50%;
+		--destructive-foreground: 0 0% 98%;
+		--border: 240 10% 85%;
+		--input: 240 10% 85%;
+		--ring: 245 65% 55%;
+		--success: 145 60% 42%;
+		--success-foreground: 0 0% 100%;
+		--warning: 40 75% 50%;
+		--warning-foreground: 0 0% 10%;
+
+		--sidebar: 240 12% 95%;
+		--sidebar-foreground: 245 25% 18%;
+		--sidebar-accent: 260 15% 92%;
+		--sidebar-accent-foreground: 245 30% 15%;
+		--sidebar-border: 240 8% 88%;
+		--sidebar-ring: 245 65% 60%;
+	}
+
+	.dark.theme-liquid-glass {
+		--background: 250 25% 10%;
+		--foreground: 240 10% 95%;
+		--card: 250 20% 15%;
+		--card-foreground: 240 10% 95%;
+		--popover: 250 18% 12%;
+		--popover-foreground: 240 10% 95%;
+		--primary: 245 60% 65%;
+		--primary-foreground: 250 25% 8%;
+		--secondary: 265 55% 60%;
+		--secondary-foreground: 250 25% 8%;
+		--muted: 250 15% 22%;
+		--muted-foreground: 250 10% 65%;
+		--accent: 275 60% 65%;
+		--accent-foreground: 250 25% 8%;
+		--destructive: 0 55% 50%;
+		--destructive-foreground: 0 0% 98%;
+		--border: 250 15% 25%;
+		--input: 250 15% 25%;
+		--ring: 245 60% 65%;
+		--success: 145 55% 45%;
+		--success-foreground: 250 25% 8%;
+		--warning: 40 70% 50%;
+		--warning-foreground: 0 0% 10%;
+
+		--sidebar: 250 20% 12%;
+		--sidebar-foreground: 250 8% 90%;
+		--sidebar-accent: 255 15% 22%;
+		--sidebar-accent-foreground: 250 8% 90%;
+		--sidebar-border: 250 15% 20%;
+		--sidebar-ring: 245 60% 65%;
+	}
+
+	/** VSCode 主题（Light+，浅色基础） */
+	html.theme-vscode {
+		--background: 0 0% 100%;
+		--foreground: 0 0% 12%;
+		--card: 0 0% 100%;
+		--card-foreground: 0 0% 12%;
+		--popover: 0 0% 100%;
+		--popover-foreground: 0 0% 12%;
+		--primary: 206 100% 42%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 0 0% 96%;
+		--secondary-foreground: 0 0% 12%;
+		--muted: 0 0% 96%;
+		--muted-foreground: 0 0% 38%;
+		--accent: 206 100% 42%;
+		--accent-foreground: 0 0% 100%;
+		--destructive: 0 100% 45%;
+		--destructive-foreground: 0 0% 100%;
+		--border: 0 0% 90%;
+		--input: 0 0% 90%;
+		--ring: 206 100% 42%;
+		--success: 122 39% 49%;
+		--success-foreground: 0 0% 100%;
+		--warning: 36 100% 50%;
+		--warning-foreground: 0 0% 10%;
+
+		--sidebar: 0 0% 95%;
+		--sidebar-foreground: 0 0% 12%;
+		--sidebar-accent: 0 0% 91%;
+		--sidebar-accent-foreground: 0 0% 12%;
+		--sidebar-border: 0 0% 86%;
+		--sidebar-ring: 206 100% 42%;
+	}
+
+	/** VSCode 主题（Dark+，深色基础，最经典） */
+	.dark.theme-vscode {
+		--background: 0 0% 12%;
+		--foreground: 0 0% 83%;
+		--card: 0 0% 15%;
+		--card-foreground: 0 0% 83%;
+		--popover: 0 0% 15%;
+		--popover-foreground: 0 0% 83%;
+		--primary: 204 100% 40%;
+		--primary-foreground: 0 0% 100%;
+		--secondary: 0 0% 20%;
+		--secondary-foreground: 0 0% 83%;
+		--muted: 0 0% 18%;
+		--muted-foreground: 0 0% 63%;
+		--accent: 204 100% 40%;
+		--accent-foreground: 0 0% 100%;
+		--destructive: 15 87% 70%;
+		--destructive-foreground: 0 0% 12%;
+		--border: 0 0% 24%;
+		--input: 0 0% 24%;
+		--ring: 204 100% 40%;
+		--success: 145 50% 50%;
+		--success-foreground: 0 0% 12%;
+		--warning: 36 80% 55%;
+		--warning-foreground: 0 0% 12%;
+
+		--sidebar: 0 0% 15%;
+		--sidebar-foreground: 0 0% 83%;
+		--sidebar-accent: 0 0% 20%;
+		--sidebar-accent-foreground: 0 0% 83%;
+		--sidebar-border: 0 0% 20%;
+		--sidebar-ring: 204 100% 40%;
+	}
+
+	* {
+		@apply border-border;
+	}
+
+	body {
+		@apply bg-background text-foreground font-sans antialiased;
+
+		font-feature-settings:
+			"rlig" 1,
+			"calt" 1;
+	}
+
+	/* ---- 全局滚动条美化 ---- */
+	::-webkit-scrollbar {
+		width: 6px;
+		height: 6px;
+	}
+
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	::-webkit-scrollbar-thumb {
+		background: hsl(var(--muted-foreground) / 0.25);
+		border-radius: 999px;
+		transition: background 0.2s;
+	}
+
+	::-webkit-scrollbar-thumb:hover {
+		background: hsl(var(--muted-foreground) / 0.45);
+	}
+
+	::-webkit-scrollbar-thumb:active {
+		background: hsl(var(--primary) / 0.5);
+	}
+
+	/* 窄滚动条用于紧凑区域 */
+	.scrollbar-thin::-webkit-scrollbar {
+		width: 4px;
+		height: 4px;
+	}
+
+	/* Firefox */
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+	}
+
+@layer utilities {
+	@keyframes animateIn {
+		from {
+			opacity: 0;
+			transform: scale(0.95);
+		}
+
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	@keyframes animateOut {
+		from {
+			opacity: 1;
+			transform: scale(1);
+		}
+
+		to {
+			opacity: 0;
+			transform: scale(0.95);
+		}
+	}
+
+	.animate-in {
+		animation: animateIn 150ms ease-out;
+	}
+
+	.animate-out {
+		animation: animateOut 150ms ease-in;
+	}
+
+	/** Dialog 默认阴影（非 lowpoly 主题回退） */
+	.shadow-dialog {
+		box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
+	}
+}
