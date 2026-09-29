@@ -1,6 +1,5 @@
 /**
  * 缓存能力统一管理器(lib/cache/manager)
- * - 与 Go services/cache/manager.go 1:1 迁移
  * - 聚合 Tracker / ComposeState / PrefixShape / Compaction 四个子系统
  */
 
@@ -93,14 +92,10 @@ export class CacheManager {
 
   /** 规划压缩方案(应用 Manager 配置的压缩规则) */
   planCompaction(messages: CacheMessage[], windowTokens: number, force = false): CompactPlan {
-    return planCompaction(
-      messages,
-      windowTokens,
-      this.cfg.compactRatio,
-      this.cfg.compactTarget,
-      undefined,
-      0,
+    return planCompaction(messages, windowTokens, {
+      ratio: this.cfg.compactRatio,
+      targetRatio: this.cfg.compactTarget,
       force,
-    );
+    });
   }
 }

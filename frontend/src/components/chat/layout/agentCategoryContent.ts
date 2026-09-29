@@ -15,6 +15,10 @@ import type { AgentCategory } from '@/stores/layoutStore';
 export interface CategoryItem {
   name: string;
   description: string;
+  /** 当前是否已启用/选中 */
+  active?: boolean;
+  /** 点击列表项时执行的动作 */
+  onClick?: () => void;
 }
 
 export interface CategoryGroup {

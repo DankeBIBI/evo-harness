@@ -4,9 +4,9 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/Button';
-import type { FileChange } from '@/components/editor/CodeReviewPanel';
 import { useChatStore } from '@/stores/chatStore';
 import { useLayoutStore } from '@/stores/layoutStore';
+import type { FileChange } from '@/components/editor/CodeReviewPanel';
 
 import { FileTreeSidebar } from './FileTreeSidebar';
 import { ResizeHandle } from './ResizeHandle';
@@ -30,12 +30,7 @@ import { SessionSidebar } from './SessionSidebar';
  *               其显隐状态走 layoutStore.unifiedLogOpen,本组件不再透传 onToggleUnifiedLog / showUnifiedLog
  */
 export function ChatLayout({
-  changes,
   children,
-  expanded,
-  onDiscard,
-  onDiscardAll,
-  onExpandedChange,
   onFileContentToInput,
   onKeep,
   onKeepAll,
@@ -43,24 +38,14 @@ export function ChatLayout({
   onProjectPathChange,
   projectPath,
 }: {
-  /** P1-2 (2026-07-10): 文件变更列表 —— 透传给右栏 "变更" tab */
-  changes?: FileChange[];
   children: React.ReactNode;
-  /** P1-2 (2026-07-10): 变更面板展开/折叠受控 */
-  expanded?: boolean;
-  /** P1-2 (2026-07-10): 单文件丢弃 —— 写回 originalContent + 从记录移除 */
-  onDiscard?: (change: FileChange) => void;
-  /** P1-2 (2026-07-10): 全部丢弃 —— 批量回滚 */
-  onDiscardAll?: () => void;
-  /** P1-2 (2026-07-10): 变更面板展开/折叠回调 */
-  onExpandedChange?: (expanded: boolean) => void;
   /** 右栏选中文件后回调（用于把文件内容回填到聊天输入框） */
   onFileContentToInput?: (path: string, content: string) => void;
-  /** P1-2 (2026-07-10): 单文件保留 —— 从记录移除 */
+  /** 右栏"变更"tab 单文件保留（透传给 FileTreeSidebar） */
   onKeep?: (change: FileChange) => void;
-  /** P1-2 (2026-07-10): 全部保留 —— 清空记录 */
+  /** 右栏"变更"tab 全部保留（透传给 FileTreeSidebar） */
   onKeepAll?: () => void;
-  /** P1-2 (2026-07-10): 点击文件行触发 —— 打开 diff 弹窗 */
+  /** 右栏"变更"tab 打开 diff 弹窗（透传给 FileTreeSidebar） */
   onOpenDiff?: (change: FileChange) => void;
   /** 右栏切换项目目录后回调（用于同步到 useChatProject） */
   onProjectPathChange?: (path: string) => void;
@@ -150,7 +135,9 @@ export function ChatLayout({
           visible={leftVisible}
           width={leftRenderWidth}
         >
-          <SessionSidebar onCreateConversation={handleCreateConversation} />
+          <SessionSidebar
+            onCreateConversation={handleCreateConversation}
+          />
         </CollapsibleSidebar>
 
         {/* 左栏 resize handle — 仅在“完整模式”且可见时才挂载(图标条模式无 resize) */}
@@ -209,11 +196,6 @@ export function ChatLayout({
           width={rightRenderWidth}
         >
           <FileTreeSidebar
-            changes={changes}
-            expanded={expanded}
-            onDiscard={onDiscard}
-            onDiscardAll={onDiscardAll}
-            onExpandedChange={onExpandedChange}
             onFileContentToInput={onFileContentToInput}
             onKeep={onKeep}
             onKeepAll={onKeepAll}

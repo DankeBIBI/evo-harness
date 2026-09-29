@@ -72,7 +72,8 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       clearTimeout(_timeoutId);
       set({ _timeoutId: null });
     }
-    set({ status: 'approved' });
+    // 决策完成即清空 resolver:防止下一轮 submit 后 waitForDecision 误入「复用 pending」分支而不设超时
+    set({ status: 'approved', _resolve: null });
     _resolve?.('approved');
   },
 
@@ -82,7 +83,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       clearTimeout(_timeoutId);
       set({ _timeoutId: null });
     }
-    set({ status: 'refined', feedback });
+    set({ status: 'refined', feedback, _resolve: null });
     _resolve?.('refined', feedback);
   },
 
@@ -92,7 +93,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       clearTimeout(_timeoutId);
       set({ _timeoutId: null });
     }
-    set({ status: 'rejected' });
+    set({ status: 'rejected', _resolve: null });
     _resolve?.('rejected');
   },
 
@@ -150,7 +151,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
         // 超时兜底：自动 approve + 把状态切到 approved（避免 pending 一直挂着）
         if (cur && get().status === 'pending') {
           cur('approved');
-          set({ status: 'approved' });
+          set({ status: 'approved', _resolve: null, _timeoutId: null });
         }
         resolve({ action: 'approved' });
       }, timeoutMs);

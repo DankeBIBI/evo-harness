@@ -1,6 +1,5 @@
 /**
  * 缓存命中指标追踪器(lib/cache/tracker)
- * - 与 Go services/cache/tracker.go 1:1 迁移
  * - 单会话累计计数: 缓存命中 / 未命中 / 输出 / turn 数
  */
 
@@ -34,7 +33,7 @@ export interface SessionCacheStats {
 
 /** 单轮命中率: cacheRead / (cacheRead + input);总输入为 0 返回 0 */
 export function usageHitRate(u: Usage): number {
-  const total = u.cacheReadTokens + u.inputTokens;
+	const total = u.cacheReadTokens + u.cacheCreationTokens + u.inputTokens;
   return total === 0 ? 0 : u.cacheReadTokens / total;
 }
 

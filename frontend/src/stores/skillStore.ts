@@ -142,6 +142,8 @@ export const useSkillStore = create<SkillState>()(
         tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
         source: ((s as unknown as { source?: string }).source as Source) || 'user-db',
         filePath: (s as unknown as { filePath?: string }).filePath,
+        content: (s as unknown as { content?: string }).content,
+        scopeId: (s as unknown as { scopeId?: string }).scopeId,
         createdAt: String(s.createdAt ?? ''),
         updatedAt: String(s.updatedAt ?? ''),
       }));

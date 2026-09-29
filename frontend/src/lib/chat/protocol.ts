@@ -12,6 +12,12 @@ export interface ToolSchema {
 /** 单轮对话消息(对齐 OpenAI / Anthropic 协议 messages[] 数组项) */
 export interface ChatMessage {
 	content: string;
+	/** Anthropic assistant 原始内容块（thinking/text/tool_use）；存在时优先原样回传。 */
+	providerContentBlocks?: Array<Record<string, unknown>>;
+	/** OpenAI-compatible 扩展推理字段（如 MiniMax reasoning_details）。 */
+	reasoningDetails?: Array<Record<string, unknown>>;
+	/** 多轮工具续传的原始协议顺序（assistant → tool/user(tool_result)）。 */
+	providerTranscript?: Array<ChatMessage>;
 	role: "assistant" | "tool" | "user";
 	toolCallId?: string;
 	toolCalls?: Array<{
@@ -25,6 +31,8 @@ export interface ChatMessage {
 export interface ContinuationMessage {
 	content: string;
 	id: string;
+	providerContentBlocks?: Array<Record<string, unknown>>;
+	reasoningDetails?: Array<Record<string, unknown>>;
 	role: string;
 	toolCallId?: string;
 	toolCalls?: Array<{

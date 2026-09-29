@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/Badge";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import {
     Check,
@@ -25,8 +26,18 @@ interface CodeReviewPanelProps {
 	changes: FileChange[];
 	onAcceptChange: (change: FileChange) => void;
 	onRejectChange: (change: FileChange) => void;
-	onToggleCollapse: () => void;
+	/**
+	 * 切换折叠(collapsed↔展开)
+	 * sidebar 模式下通常不传(无浮条入口);overlay 模式 /editor 页用
+	 */
+	onToggleCollapse?: () => void;
 	collapsed?: boolean;
+	/**
+	 * 2026-08-31: 渲染模式
+	 * - 'sidebar' (默认): flex 自适应,作为父容器子项(左栏 tab 用)
+	 * - 'overlay': 绝对定位占满父容器(独立 /editor 页用,需父级 relative)
+	 */
+	mode?: "overlay" | "sidebar";
 }
 
 /** DiffLineItem = DiffLine(共享 lib/diff 的类型别名,避免在多处重新定义) */
@@ -231,6 +242,7 @@ export function CodeReviewPanel({
 	onAcceptChange,
 	onRejectChange,
 	collapsed = false,
+	mode = "sidebar",
 	onToggleCollapse,
 }: CodeReviewPanelProps) {
 	const stats = useMemo(
@@ -294,8 +306,12 @@ export function CodeReviewPanel({
 	}
 
 	return (
-		<div className="absolute inset-0 z-20 flex min-w-0 flex-col bg-card">
-			<div className="flex items-center justify-between border-b border-border/70 px-6 py-5">
+		<div
+			className={cn(
+				"flex min-h-0 min-w-0 flex-1 flex-col bg-card",
+				mode === "overlay" && "absolute inset-0 z-20",
+			)}>
+			<div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
 				<div>
 					<h2 className="text-lg font-semibold tracking-tight">代码审查</h2>
 					<p className="mt-1 text-xs text-muted-foreground">
@@ -308,7 +324,7 @@ export function CodeReviewPanel({
 					{pendingCount > 0 && (
 						<>
 							<Button
-								className="h-8 gap-1.5 text-xs"
+								className="h-7 gap-1.5 text-xs"
 								onClick={handleAcceptAll}
 								size="sm"
 								variant="outline">
@@ -316,7 +332,7 @@ export function CodeReviewPanel({
 								全部接受
 							</Button>
 							<Button
-								className="h-8 gap-1.5 text-xs"
+								className="h-7 gap-1.5 text-xs"
 								onClick={handleRejectAll}
 								size="sm"
 								variant="outline">
@@ -325,14 +341,6 @@ export function CodeReviewPanel({
 							</Button>
 						</>
 					)}
-					<Button
-						className="h-[20px] w-[20px]"
-						onClick={onToggleCollapse}
-						size="icon"
-						title="收起"
-						variant="ghost">
-						<ChevronRight className="h-5 w-5" />
-					</Button>
 				</div>
 			</div>
 			<div className="min-h-0 flex-1 overflow-auto px-6 py-5">

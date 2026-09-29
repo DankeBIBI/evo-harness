@@ -20,7 +20,7 @@ const MODE_META: Record<ToolMode, { label: string; hint: string }> = {
  *   - edit: 按单工具 mode,写操作需弹窗确认
  *   - auto: 跳过所有权限检查,工具自动执行
  *
- * 放置位置:ChatInput 工具栏,与"自动编排/自动路由/自动编辑"等自动类开关并列
+ * 放置位置:ChatInput 工具栏第二行工具区
  * 键盘支持:Arrow Left/Right/Up/Down 循环切换,Home/End 跳首/尾
  */
 export function ToolModeSelector() {

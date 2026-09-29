@@ -40,6 +40,12 @@ interface StreamChatRequestLike {
 	parentAgentId?: string;
 	/** 角色(system/user/assistant) */
 	role?: string;
+	/** 稳定 system 前缀；支持缓存断点的 provider 会优先缓存此段。 */
+	systemStatic?: string;
+	/** 每轮可能变化的工作区/文件/skill 上下文。 */
+	systemContext?: string;
+	/** 工具续传时为 false，避免在 tool_result 后重复追加原始 user 消息。 */
+	appendCurrentUser?: boolean;
 	/** 工具调用模式 */
 	toolMode?: string;
 	/** 请求超时(ms) */
@@ -56,6 +62,10 @@ interface StreamChatRequestLike {
 		id: string;
 		/** 消息角色 */
 		role: string;
+		/** Anthropic 原始 assistant 内容块。 */
+		providerContentBlocks?: Array<Record<string, unknown>>;
+		/** MiniMax/OpenAI-compatible 原始 reasoning_details。 */
+		reasoningDetails?: Array<Record<string, unknown>>;
 		/** 关联工具调用 id */
 		toolCallId?: string;
 		/** 工具调用列表 */
@@ -76,6 +86,13 @@ interface StreamCallbacks {
 	onContent: (text: string) => void;
 	/** 工具调用回调(累积完成时触发) */
 	onToolCall: (call: NativeToolCall) => void;
+	/** 供应商原始 assistant 元数据增量，用于无损历史回传。 */
+	onAssistantMetadata?: (metadata: {
+		contentBlock?: Record<string, unknown>;
+		contentBlockIndex?: number;
+		phase?: "delta" | "start" | "stop";
+		reasoningDetails?: Array<Record<string, unknown>>;
+	}) => void;
 	/** 用量统计回调(缓存命中/创建/费用) */
 	onUsage?: (usage: {
 		/** 缓存读取 token 数 */
@@ -84,6 +101,12 @@ interface StreamCallbacks {
 		cacheCreation: number;
 		/** 本次费用(元) */
 		costCny: number;
+		/** 未缓存输入 token。 */
+		input?: number;
+		/** 输出 token。 */
+		output?: number;
+		/** API 明确给出的总 token。 */
+		total?: number;
 	}) => void;
 	/** 流结束回调(幂等,只触发一次) */
 	onDone: () => void;

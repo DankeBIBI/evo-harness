@@ -34,6 +34,12 @@ const STATE_FILE = path.join(STATE_DIR, 'file-server-root.json');
 /** 当前根目录 */
 let root = PROJECT_ROOT;
 
+/** 受信任的额外根(只读),用于 ~/.claude 等固定路径。 */
+const TRUSTED_EXTRA_ROOTS = [
+  // 用户家目录下的 .claude(Windows/macOS/Linux 都用 os.homedir() 解析)
+  path.join(os.homedir(), '.claude'),
+];
+
 function loadRoot() {
   if (CLI_ROOT) {
     root = path.resolve(CLI_ROOT);
@@ -53,9 +59,28 @@ function persistRoot(nextRoot) {
   root = nextRoot;
 }
 
-/** 相对路径 → 根内绝对路径(越界抛错,防路径穿越) */
+/**
+ * 把"@trusted"或普通相对路径解析为绝对路径。
+ *   - 路径以 "@trusted/<key>/..." 开头时,匹配 TRUSTED_EXTRA_ROOTS 之一
+ *   - 否则按项目根解析
+ * 越界抛 403。
+ */
 function safeResolve(relPath) {
   const rel = String(relPath ?? '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (rel.startsWith('@trusted/')) {
+    const rest = rel.slice('@trusted/'.length);
+    const slash = rest.indexOf('/');
+    const key = slash >= 0 ? rest.slice(0, slash) : rest;
+    const tail = slash >= 0 ? rest.slice(slash + 1) : '';
+    const trustedRoot = TRUSTED_EXTRA_ROOTS[Number(key)] ?? TRUSTED_EXTRA_ROOTS[key];
+    if (!trustedRoot) {
+      const err = new Error(`未知的受信任根: @trusted/${key}`);
+      err.status = 404;
+      throw err;
+    }
+    const abs = path.resolve(trustedRoot, tail);
+    return abs;
+  }
   const abs = path.resolve(root, rel);
   const relToRoot = path.relative(root, abs);
   if (relToRoot.startsWith('..') || path.isAbsolute(relToRoot)) {
@@ -183,7 +208,15 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   try {
     if (req.method === 'GET' && p === '/api/health') {
-      send(res, 200, { ok: true, root, rootName: path.basename(root) });
+      send(res, 200, {
+        extraRoots: TRUSTED_EXTRA_ROOTS.map((p) => ({
+          name: path.basename(p),
+          path: p,
+        })),
+        ok: true,
+        root,
+        rootName: path.basename(root),
+      });
       return;
     }
     if (req.method === 'GET' && p === '/api/list') {

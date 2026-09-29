@@ -91,6 +91,7 @@ export const replaceInFileRegexTool: Tool = {
   category: 'file',
   description:
     'Replace text in a file by regex pattern. Supports backreferences like $1, $2 in newText.',
+  mutating: true,
   execute: async (params) => {
     const { ReplaceInFileRegex } = await getFileService();
     const filePath = params.filePath as string;

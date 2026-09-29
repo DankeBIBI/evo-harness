@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 /** 工具权限模式 */
 export type ToolPermissionMode = 'auto' | 'ask' | 'disabled';
@@ -28,26 +29,37 @@ interface ToolPermissionState {
   resetToDefaults: () => void;
 }
 
-export const useToolPermissionStore = create<ToolPermissionState>((set, get) => ({
-  permissions: { ...DEFAULT_PERMISSIONS },
+export const useToolPermissionStore = create<ToolPermissionState>()(
+  persist(
+    (set, get) => ({
+      permissions: { ...DEFAULT_PERMISSIONS },
 
-  setPermission: (toolName, mode) => {
-    set((state) => ({
-      permissions: { ...state.permissions, [toolName]: mode },
-    }));
-  },
+      setPermission: (toolName, mode) => {
+        set((state) => ({
+          permissions: { ...state.permissions, [toolName]: mode },
+        }));
+      },
 
-  setPermissions: (map) => {
-    set((state) => ({
-      permissions: { ...state.permissions, ...map },
-    }));
-  },
+      setPermissions: (map) => {
+        set((state) => ({
+          permissions: { ...state.permissions, ...map },
+        }));
+      },
 
-  getPermission: (toolName) => {
-    return get().permissions[toolName] || 'auto';
-  },
+      getPermission: (toolName) => {
+        return (
+          get().permissions[toolName] ??
+          DEFAULT_PERMISSIONS[toolName] ??
+          'auto'
+        );
+      },
 
-  resetToDefaults: () => {
-    set({ permissions: { ...DEFAULT_PERMISSIONS } });
-  },
-}));
+      resetToDefaults: () => {
+        set({ permissions: { ...DEFAULT_PERMISSIONS } });
+      },
+    }),
+    {
+      name: 'ai-studio-tool-permissions',
+    },
+  ),
+);

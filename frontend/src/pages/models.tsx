@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getModelTokenPreset } from '@/lib/chat/modelPresets';
 
 const providerLabels: Record<string, string> = {
   openai: 'OpenAI',
@@ -131,8 +132,7 @@ export default function ModelsPage() {
         baseUrl: newModel.baseUrl,
         apiKey: newModel.apiKey,
         isEnabled: true,
-        maxInputTokens: 128000,
-        maxOutputTokens: 8192,
+        ...getModelTokenPreset(newModel.name),
         supportsStreaming: true,
         supportsToolCall: true,
         supportsVision: true,

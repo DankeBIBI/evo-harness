@@ -55,45 +55,14 @@ function isAnswered(
 	return Array.isArray(v) && v.length > 0;
 }
 
-/** 折叠态的占位文本生成 — 避免在子组件内重复拼接 */
-function buildSummary(
-	questions: AskUserQuestion[],
-	answers: AskUserAnswers,
-	cancelled: boolean,
-): string {
-	if (cancelled) return "已取消";
-	const parts: string[] = [];
-	for (const q of questions) {
-		const v = answers[q.id];
-		if (q.type === "text") {
-			const s = typeof v === "string" ? v.trim() : "";
-			parts.push(s ? `${q.id}=${s}` : `${q.id}=—`);
-		} else if (q.type === "single") {
-			const opt = q.options?.find((o) => o.value === v);
-			parts.push(opt ? `${q.id}=${opt.label}` : `${q.id}=—`);
-		} else {
-			const arr = (v as string[] | undefined) ?? [];
-			const labels = (q.options ?? [])
-				.filter((o) => arr.includes(o.value))
-				.map((o) => o.label);
-			parts.push(
-				labels.length ? `${q.id}=[${labels.join(", ")}]` : `${q.id}=[]`,
-			);
-		}
-	}
-	return parts.join(" · ");
-}
+/** AskUserCard — 提问表单(活跃态);已 settled 折叠态见 AskUserFoldedChip */
 
 const AskUserCard: React.FC<{ tcId?: string }> = ({ tcId }) => {
 	// 2026-07-24 重大修复:按 tcId 订阅 store,不再用全局 status
-	//   旧实现:每个 AskUserCard 都读同一个全局 status,导致"每个气泡都显示最新卡"
-	//   新实现:每个 tcId 独立 pending + snapshot,按 tcId 精准控制
-	//   没有 tcId 的兜底(不该发生):从 pending map 取第一个,有 tcId 但 pending/snapshot 都空:不渲染
+	// 2026-08-31: snapshot 折叠态由 AskUserDock 内的 AskUserFoldedChip 渲染,
+	// AskUserCard 只关心 pending(用户还在回答)
 	const pending = useAskUserStore((s) =>
 		tcId ? s.pending.get(tcId) : undefined,
-	);
-	const snapshot = useAskUserStore((s) =>
-		tcId ? s.snapshots.get(tcId) : undefined,
 	);
 	const resolveByTcId = useAskUserStore((s) => s.resolveByTcId);
 	const cancelByTcId = useAskUserStore((s) => s.cancelByTcId);
@@ -102,7 +71,7 @@ const AskUserCard: React.FC<{ tcId?: string }> = ({ tcId }) => {
 	const [answers, setAnswers] = useState<AskUserAnswers>({});
 
 	// 2026-07-24 修复:React hooks 顺序违规 — useMemo 必须在 early return 之前无条件执行
-	const questions = pending?.questions ?? snapshot?.questions ?? [];
+	const questions = pending?.questions ?? [];
 	const isPending = !!pending && !pending.settled;
 	const canSubmit = useMemo(() => {
 		if (questions.length === 0) return false;
@@ -112,24 +81,9 @@ const AskUserCard: React.FC<{ tcId?: string }> = ({ tcId }) => {
 		});
 	}, [answers, questions]);
 
-	// 折叠态(已提交/已取消)— 跟气泡里其他 toolcall 活动行的尺寸一致
-	if (!isPending && snapshot) {
-		return (
-			<div
-				className="border-border/40 bg-muted/20 text-muted-foreground group/folded flex w-full min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-xs"
-				data-tc-id={tcId}>
-				<CheckCircle2 className="h-[12px] w-[12px] shrink-0 text-foreground/70" />
-				<span className="shrink-0 font-medium">
-					{snapshot.cancelled ? "询问已取消" : "询问已答"}
-				</span>
-				<span className="text-muted-foreground/60 shrink-0">·</span>
-				<span className="min-w-0 truncate font-mono">
-					{buildSummary(snapshot.questions, snapshot.answers, snapshot.cancelled)}
-				</span>
-			</div>
-		);
-	}
-
+	// 2026-08-31: 折叠态(已提交/已取消)由 AskUserDock 内的 AskUserFoldedChip 渲染,
+	// 避免主组件既要管 pending 表单又要管 snapshot 折叠态两套 JSX。
+	// 当前组件只负责"用户还在等回答"的活跃卡,settled 后由父级切换为折叠态组件。
 	if (!isPending || questions.length === 0) return null;
 
 	const handleSingleChange = (qid: string, value: string) => {
@@ -176,7 +130,7 @@ const AskUserCard: React.FC<{ tcId?: string }> = ({ tcId }) => {
 
 	return (
 		<Card
-			className="border-primary/40 bg-card ml-[-20px] mt-[-20px]"
+			className="border-primary/40 bg-card w-full"
 			data-tc-id={tcId}
 			role="region"
 			aria-label="Ask user">

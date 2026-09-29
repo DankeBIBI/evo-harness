@@ -128,18 +128,18 @@ export const useAnalysisStore = create<AnalysisState>()(
         if (!analysis) return;
 
         const agentStore = useAgentStore.getState();
-        const existingAgents = agentStore.agents;
+        const existingNames = new Set(
+          agentStore.agents
+            .filter((a) => a.source === source)
+            .map((a) => a.name),
+        );
 
         // 将分析结果中的 agents 添加到 agentStore
         for (const agentInfo of analysis.agents) {
-          // 检查是否已存在(同来源同名跳过)
-          const exists = existingAgents.some(
-            (a) => a.name === agentInfo.name && a.source === source,
-          );
-          if (exists) continue;
+          if (existingNames.has(agentInfo.name)) continue;
 
           try {
-            await agentStore.addAgent({
+            await useAgentStore.getState().addAgent({
               name: agentInfo.name,
               description: agentInfo.description || '',
               scope: 'project',
@@ -162,13 +162,14 @@ export const useAnalysisStore = create<AnalysisState>()(
               filePath: agentInfo.path,
               content: agentInfo.content || '',
             });
+            existingNames.add(agentInfo.name);
           } catch (error) {
             console.error(`Failed to add agent ${agentInfo.name}:`, error);
           }
         }
 
         // 刷新 agents 列表
-        await agentStore.fetchAgents();
+        await useAgentStore.getState().fetchAgents();
       },
 
       mountToSkillStore: async (source = 'project') => {
@@ -176,16 +177,19 @@ export const useAnalysisStore = create<AnalysisState>()(
         if (!analysis) return;
 
         const skillStore = useSkillStore.getState();
-        const existingSkills = skillStore.skills;
+        // 实时读取 hostServices 中已有的同名记录,避免重复 mount 阻塞新增
+        const existingNames = new Set(
+          skillStore.skills
+            .filter((s) => s.source === source)
+            .map((s) => s.name),
+        );
 
         for (const skillInfo of analysis.skills) {
-          const exists = existingSkills.some(
-            (s) => s.name === skillInfo.name && s.source === source,
-          );
-          if (exists) continue;
+          if (existingNames.has(skillInfo.name)) continue;
 
           try {
-            await skillStore.addSkill({
+            // 拿到最新的 skillStore 引用后再调 addSkill,避免闭包陈旧
+            await useSkillStore.getState().addSkill({
               name: skillInfo.name,
               description: skillInfo.description || '',
               type: 'prompt',
@@ -200,12 +204,13 @@ export const useAnalysisStore = create<AnalysisState>()(
               filePath: skillInfo.path,
               content: skillInfo.content || '',
             });
+            existingNames.add(skillInfo.name);
           } catch (error) {
-            console.error(`Failed to add skill ${skillInfo.name}:`, error);
+            console.error(`[mountToSkillStore] failed to add ${skillInfo.name}:`, error);
           }
         }
 
-        await skillStore.fetchSkills();
+        await useSkillStore.getState().fetchSkills();
       },
 
       readFileContent: async (filePath: string) => {

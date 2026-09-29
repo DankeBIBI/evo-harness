@@ -1,6 +1,6 @@
 /**
  * chips 解析(lib/content/chips)
- * - `@agent`  `/skill`  `@[file:10-20]` 解析
+ * - `@agent`、`/skill` 与带行号的文件引用解析
  * - 不删原文(原文原样进 prompt)
  */
 
@@ -35,7 +35,7 @@ function parseSkills(raw: string): string[] {
   return [...out];
 }
 
-/** 解析 @[file:10-20] 引用 */
+/** 解析带起止行号的文件引用 */
 function parseFiles(raw: string): FileChip[] {
   const out: FileChip[] = [];
   const seen = new Set<string>();

@@ -96,6 +96,7 @@ export const fileTools: Tool[] = [
   {
     category: 'file',
     description: 'Write content to file (overwrites existing content)',
+    mutating: true,
     execute: async (params) => {
       const { content, path } = params as { content: string; path: string };
       // 脱敏:不打印完整 content(可能含凭据/token),只报长度
@@ -120,6 +121,7 @@ export const fileTools: Tool[] = [
   {
     category: 'file',
     description: 'Replace a unique text fragment in a file. oldText must match exactly once.',
+    mutating: true,
     execute: async (params) => {
       const { newText, oldText, path } = params as { newText: string; oldText: string; path: string };
       return withLog('ReplaceInFile', { path, oldTextLen: oldText?.length, newTextLen: newText?.length }, async () => {
@@ -143,7 +145,9 @@ export const fileTools: Tool[] = [
   },
   {
     category: 'file',
+    danger: true,
     description: 'Delete the specified file (cannot delete directories)',
+    mutating: true,
     execute: async (params) => {
       const path = params.path as string;
       return withLog('DeleteFile', params, async () => {
@@ -177,9 +181,8 @@ export const fileTools: Tool[] = [
           if (!results || results.length === 0) {
             return `No files matching '${keyword}' found in '${path}'`;
           }
-          const lines = (results as any[]).map(
-            (f: { isDir: boolean; name: string; path: string; size: number }) =>
-              `- ${f.name} (${f.isDir ? 'dir' : formatSize(f.size)})`,
+          const lines = results.map(
+            (f) => `- ${f.name} (${f.isDir ? 'dir' : formatSize(f.size)})`,
           );
           return `Found ${results.length} match(es):\n${lines.join('\n')}`;
         } catch (error) {
@@ -211,9 +214,8 @@ export const fileTools: Tool[] = [
           if (!entries || entries.length === 0) {
             return `Directory empty: ${path}`;
           }
-          const lines = (entries as any[]).map(
-            (e: { isDir: boolean; name: string; size: number }) =>
-              `- ${e.name} ${e.isDir ? '(dir)' : `(${formatSize(e.size)})`}`,
+          const lines = entries.map(
+            (e) => `- ${e.name} ${e.isDir ? '(dir)' : `(${formatSize(e.size)})`}`,
           );
           return `${path}\n${lines.join('\n')}`;
         } catch (error) {

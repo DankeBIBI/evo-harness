@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import type { FileChange } from '@/components/editor/CodeReviewPanel';
+import { useFileReviewStore } from '@/stores/fileReviewStore';
 
 /** 触发 CodeDiffViewer 弹窗的参数 */
 export interface OpenDiffPayload {
@@ -40,7 +41,9 @@ export function useFileChangesPanel(params: {
   onOpenDiff: (payload: OpenDiffPayload) => void;
 }) {
   const { onFeedback, onOpenDiff } = params;
-  const [reviewChanges, setReviewChanges] = useState<FileChange[]>([]);
+  // 2026-08-31: 状态改用 fileReviewStore 共享,这样左栏 SessionSidebar 也能订阅
+  const reviewChanges = useFileReviewStore((s) => s.changes);
+  const setReviewChanges = useFileReviewStore((s) => s.setChanges);
   const [fileChangesExpanded, setFileChangesExpanded] = useState(false);
 
   /** 单文件保留 —— 从 reviewChanges 移除(AI 已落盘的变更留在盘上, 仅清除记录) */

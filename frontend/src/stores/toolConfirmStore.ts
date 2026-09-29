@@ -7,7 +7,7 @@ export interface ToolConfirmRequest {
   params: Record<string, unknown>;
   /** 受影响的关键参数（如文件路径） */
   keyParam: string;
-  /** 内部使用：每个 request 独立的 resolve,等待用户统一操作后批量触发 */
+  /** 内部使用：每个 request 独立的 resolve,由 resolveAll 按新语义触发 */
   resolve: (action: 'allow-once' | 'allow-always' | 'deny') => void;
 }
 
@@ -18,7 +18,7 @@ interface ToolConfirmState {
   batched: ToolConfirmRequest[];
   /** 发起确认请求:自动合并到当前批次,共享用户操作 */
   request: (req: Omit<ToolConfirmRequest, 'resolve'>) => Promise<'allow-once' | 'allow-always' | 'deny'>;
-  /** 用户操作后批量触发所有 batched 的 resolve */
+  /** 用户操作后分发:deny 整批终止;allow-* 仅作用于当前展示的 pending(allow-always 连同同工具排队请求一并放行) */
   resolveAll: (action: 'allow-once' | 'allow-always' | 'deny') => void;
 }
 
@@ -39,11 +39,26 @@ export const useToolConfirmStore = create<ToolConfirmState>((set, get) => ({
   },
 
   resolveAll: (action) => {
-    const { batched } = get();
-    if (batched.length === 0) return;
-    // 关键修复:一次性 resolve 所有 batched,而不是链式 deny 前一个
-    const snapshot = batched;
-    set({ batched: [], pending: null });
-    snapshot.forEach((r) => r.resolve(action));
+    const { batched, pending } = get();
+    if (!pending || batched.length === 0) return;
+
+    // deny 是安全默认:整批终止,AI 收到全部 denied
+    if (action === 'deny') {
+      const snapshot = batched;
+      set({ batched: [], pending: null });
+      snapshot.forEach((r) => r.resolve('deny'));
+      return;
+    }
+
+    // allow-once 仅放行当前展示的这一个请求;
+    // allow-always 因权限已按工具名持久化为 auto,同工具的排队请求一并放行(放行后同样会被判 auto);
+    // 其余工具保持排队,等待用户逐个处理
+    const release =
+      action === 'allow-always'
+        ? batched.filter((r) => r.toolName === pending.toolName)
+        : [pending];
+    const rest = batched.filter((r) => !release.includes(r));
+    set({ batched: rest, pending: rest[0] ?? null });
+    release.forEach((r) => r.resolve(action));
   },
 }));

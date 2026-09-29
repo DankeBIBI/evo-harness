@@ -27,11 +27,16 @@ import { useSkillStore } from "@/stores/skillStore";
 import { StreamChat as streamChatAPI } from "@/lib/hostServices/ChatService";
 // P1-1: 原生 function call 需要从 toolRegistry 查 JSON Schema
 import { toolRegistry, toolNameAliases } from "@/lib/tools/registry";
+import { findSkillByName, serializeSkill } from "@/lib/tools/builtin/skillTools";
+import { RESIDENT_TOOLS } from "@/stores/sessionToolStore";
 import { EventsOff, EventsOn } from "@/lib/hostServices/eventBus";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { devLog } from "@/lib/devLog";
 import { processContent } from "@/lib/content/processor";
+import { estimateTokens } from "@/lib/tokenEstimate";
+import { getModelCapabilities } from "@/lib/chat/providers/capabilities";
+import { useModelStore } from "@/stores/modelStore";
 
 import {
 	buildAgentSummary,
@@ -43,21 +48,12 @@ import {
 import { useMessageQueue } from "./streaming/queueManager";
 import { useStreamingController } from "./streaming/streamingController";
 import { useStreamingSession } from "./streaming/streamingSession";
-import { createStreamingContext } from "./streaming/streamingContext";
+import {
+	createStreamingContext,
+	type NativeCallBuf,
+} from "./streaming/streamingContext";
 
 const LOG = "chat:streaming";
-
-/** 基础文件工具：修改文件任务至少需要读、写、替换、搜索能力 */
-const BASIC_FILE_TOOLS = [
-	"ReadFile",
-	"ReadFileRange",
-	"WriteFile",
-	"ReplaceInFile",
-	"ReplaceInFileRegex",
-	"SearchFiles",
-	"ListDir",
-	"DeleteFile",
-];
 
 /**
  * 构建 Skills 摘要（名称+描述+标签），注入 system prompt 供 AI 发现匹配的 skill
@@ -83,10 +79,7 @@ function buildSkillsSummary(
 export type { QueuedMessage } from "./streaming/queueManager";
 
 export interface UseStreamingOptions {
-	addMessage: (
-		convId: string,
-		message: { content: string; createdAt: string; id: string; role: string },
-	) => void;
+	addMessage: (convId: string, message: Message) => void;
 	/** 当前会话 id（用于切换会话时重置 tokenStats 等会话级状态） */
 	currentConvId: null | string;
 	availableAgents: AgentLite[];
@@ -97,6 +90,7 @@ export interface UseStreamingOptions {
 		fileMentions?: FileMentionReference[],
 		matchedPrompts?: Prompt[],
 		conversationHistory?: HistoryMessageInput[],
+		modelOptions?: { maxInputTokens?: number; preserveReasoning?: boolean },
 	) => Promise<{
 		systemContext: string;
 		userMessage: string;
@@ -207,6 +201,10 @@ export function useChatStreaming(options: UseStreamingOptions) {
 	const streamingIdRef = useRef<null | string>(null);
 	const streamingContentRef = useRef("");
 	const isPausedRef = useRef(false);
+	/** 原生 tool_call 累积器（跨 chunk 累积，按 index 合并）— 提升到 ctx 供 stop 统一清理 */
+	const nativeToolCallsRef = useRef<Map<number, NativeCallBuf>>(new Map());
+	/** streamingRawContent rAF 节流句柄 — 提升到 ctx 供 stop 统一取消 */
+	const streamingRawRafIdRef = useRef<number | null>(null);
 	/** 保存最新的 convId，避免闭包陷阱 */
 	const currentConvIdRef = useRef<null | string>(null);
 	// P1-2: 记录当前会话的 agentId,handleStop 时传给后端 CancelChat
@@ -277,12 +275,14 @@ export function useChatStreaming(options: UseStreamingOptions) {
 		isProcessingQueueRef,
 		lastSentToolModeRef,
 		messageQueueRef,
+		nativeToolCallsRef,
 		originalAiContentRef,
 		pendingToolResultsRef,
 		responseTimeoutRef,
 		sendContinuationRef,
 		streamingContentRef,
 		streamingIdRef,
+		streamingRawRafIdRef,
 		waitingForContinuationRef,
 		setIsPaused,
 		setStreamingContent,
@@ -350,9 +350,13 @@ export function useChatStreaming(options: UseStreamingOptions) {
 		};
 	}, [cleanupSession]);
 
-	/** 切换会话时重置 tokenStats */
+	/** 切换会话时恢复该会话累计 tokenStats。 */
 	useEffect(() => {
-		setTokenStats({
+		const persisted = useChatStore
+			.getState()
+			.conversations.find((conversation) => conversation.id === currentConvId)
+			?.tokenStats;
+		setTokenStats(persisted ? { ...persisted, outputCostCny: 0 } : {
 			cacheCreationTokens: 0,
 			cacheReadTokens: 0,
 			hitRate: 0,
@@ -365,6 +369,35 @@ export function useChatStreaming(options: UseStreamingOptions) {
 		});
 	}, [currentConvId]);
 
+	/** B1 (2026-09-06): 切换会话时停止当前流式
+	 *  修复: 旧实现切会话不调 handleStop,流式在后台继续,新会话会看到旧会话的
+	 *        "幽灵"流式气泡(streamingContent 是 hook 级 state,与会话无关)
+	 *  用 prevConvIdRef 守卫,仅真正切换时触发;handleStop 内部有 EventsOff + 状态清理
+	 *  2026-09-06 复审: ① 同时调用 cancelChatOnBackend 取消后端流,避免旧会话继续
+	 *        消耗 token / 产生文件副作用;② 用 handleStopRef 间接调用,让 effect 只依赖
+	 *        currentConvId(handleStop 依赖未 memoize 的 ctx,直接依赖会每帧重跑) */
+	const handleStopRef = useRef(handleStop);
+	handleStopRef.current = handleStop;
+	const prevConvIdRef = useRef(currentConvId);
+	useEffect(() => {
+		if (prevConvIdRef.current === currentConvId) return;
+		prevConvIdRef.current = currentConvId;
+		if (streamingIdRef.current) {
+			// 取消后端流: currentAgentIdRef / currentConvIdRef 仍是旧会话的值(切换后未发新消息)
+			if (
+				streamingCtx.cancelChatOnBackend &&
+				currentAgentIdRef.current &&
+				currentConvIdRef.current
+			) {
+				void streamingCtx.cancelChatOnBackend(
+					currentAgentIdRef.current,
+					currentConvIdRef.current,
+				);
+			}
+			handleStopRef.current();
+		}
+	}, [currentConvId]);
+
 	/** 同步 streamingIdRef */
 	useEffect(() => {
 		streamingIdRef.current = streamingId;
@@ -375,33 +408,6 @@ export function useChatStreaming(options: UseStreamingOptions) {
 		availableAgents,
 		selectedAgent,
 	);
-
-	/** 估算文本 token 数
-	 *  使用 cl100k_base 近似: 中文 ~0.6 token/字, 英文 ~0.75 token/词, 代码字符 ~0.3 token/字
-	 *  参考: GPT-4 tokenizer 实测 */
-	const estimateTokens = (text: string): number => {
-		if (!text) return 0;
-		const chineseChars = (text.match(/\p{Script=Han}/gu) || []).length;
-		const englishWords = text.match(/[a-z]+/gi) || [];
-		const englishTokens = englishWords.reduce(
-			(sum, w) => sum + Math.ceil(w.length / 4),
-			0,
-		);
-		const englishLetters = englishWords.reduce((sum, w) => sum + w.length, 0);
-		const codeChars = (text.match(/[{}\[\]()=;:<>`~!@#$%^&*+\-|\\/]/g) || [])
-			.length;
-		// 扣除已归类的中文/英文字母/代码符号，剩余为数字/空格/标点/emoji 等
-		const otherChars = Math.max(
-			0,
-			[...text].length - chineseChars - englishLetters - codeChars,
-		);
-		return Math.ceil(
-			chineseChars * 0.6 +
-				englishTokens * 0.75 +
-				codeChars * 0.3 +
-				otherChars * 0.25,
-		);
-	};
 
 	// === sendMessage 主入口 ===
 	const sendMessage = useCallback(
@@ -485,6 +491,7 @@ export function useChatStreaming(options: UseStreamingOptions) {
 				content: nextInput,
 				createdAt: new Date().toISOString(),
 				id: userMsgId,
+				referencedFiles: [...new Set(fileMentions.map((mention) => mention.path).filter(Boolean))],
 				role: "user",
 			});
 			addMessage(convId, {
@@ -523,6 +530,16 @@ export function useChatStreaming(options: UseStreamingOptions) {
 					fileMentions,
 					undefined,
 					historyMessages,
+					(() => {
+						const selected = useModelStore.getState().models.find(
+							(model) => model.id === (entryAgent?.modelId || useModelStore.getState().selectedModelId),
+						);
+						if (!selected) return undefined;
+						return {
+							maxInputTokens: selected.maxInputTokens,
+							preserveReasoning: getModelCapabilities(selected).preserveReasoningInHistory,
+						};
+					})(),
 				);
 				devLog.d(LOG, "buildWorkspaceMessage done", {
 					historyLen: historyChatMessages.length,
@@ -575,31 +592,27 @@ export function useChatStreaming(options: UseStreamingOptions) {
 				const skillsSummary = buildSkillsSummary(
 					useSkillStore.getState().skills,
 				);
-				const fullRole = [roleText, systemContext, skillsSummary]
+				// 用户通过 /skill-name 明确选择的 Skill 直接注入完整正文；
+				// 未显式选择的 Skill 仍可通过常驻 LoadSkill(name) 按需加载。
+				const selectedSkillsContext = skillMentions
+					.map((name) => findSkillByName(name))
+					.filter((skill): skill is NonNullable<typeof skill> => !!skill)
+					.map(serializeSkill)
+					.join("\n\n");
+				const staticRole = [roleText, skillsSummary].filter(Boolean).join("\n\n");
+				const dynamicContext = [
+					systemContext,
+					selectedSkillsContext
+						? `## 本轮已选择 Skills\n\n${selectedSkillsContext}`
+						: "",
+				]
 					.filter(Boolean)
 					.join("\n\n");
+				const fullRole = [staticRole, dynamicContext].filter(Boolean).join("\n\n");
+				// 常驻工具单一来源(sessionToolStore.RESIDENT_TOOLS):
+				// 文件 8(含 ReadFileRange) + Todo 8 + 元工具/plan/交互 4
 				const effectiveTools = [
-					...new Set([
-						...(effectiveEntry.tools || []),
-						...BASIC_FILE_TOOLS,
-						// 2026-07-23: 基础内置工具(所有 agent 都应有,不依赖 agent 配置手填)
-						// - 8 个 Todo*:让 AI 能主动管理任务清单,与用户 UI 操作对称
-						// - 2 个元工具:ListTools / GetToolDef,让 AI 能 discover 自己可用工具
-						// - 1 个 plan 工具:SubmitPlan,让 AI 提交结构化计划待用户审批
-						"TodoAdd",
-						"TodoList",
-						"TodoToggle",
-						"TodoUpdateStatus",
-						"TodoEdit",
-						"TodoSetPriority",
-						"TodoDelete",
-						"TodoClearCompleted",
-						"ListTools",
-						"GetToolDef",
-						"SubmitPlan",
-						// 2026-07-24: AskUser — 交互工具,AI 主动向用户提问
-						"AskUser",
-					]),
+					...new Set([...(effectiveEntry.tools || []), ...RESIDENT_TOOLS]),
 				];
 
 				// P1-1: 工具名 → JSON Schema 转换
@@ -607,15 +620,15 @@ export function useChatStreaming(options: UseStreamingOptions) {
 				// 查 toolRegistry 拿到每个 tool 的 params (ParamSchema) + description
 				// 统一转成后端需要的 ToolSchema[]
 				const toolSchemas: ToolSchema[] = effectiveTools
-					.map((toolName) => {
+					.map((toolName): ToolSchema | null => {
 						const realName = toolNameAliases[toolName] || toolName;
 						const tool = toolRegistry.get(realName);
 						if (!tool) return null;
 						return {
 							description: tool.description,
 							name: tool.name,
-							parameters: tool.params as unknown as Record<string, unknown>,
-						} as ToolSchema;
+							parameters: tool.params,
+						};
 					})
 					.filter((s): s is ToolSchema => s !== null);
 
@@ -637,6 +650,8 @@ export function useChatStreaming(options: UseStreamingOptions) {
 					modelId: effectiveEntry.modelId || "",
 					parentAgentId: "",
 					role: fullRole,
+					systemStatic: staticRole,
+					systemContext: dynamicContext,
 					toolMode: useSettingsStore.getState().toolMode,
 					timeout: requestTimeout,
 					tools: effectiveTools,

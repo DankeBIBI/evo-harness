@@ -5,22 +5,25 @@
  * 这些工具会合并进 useChatStreaming 的 effectiveTools,作为该会话的额外放行。
  *
  * 常驻工具(RESIDENT_TOOLS)不依赖勾选,任何会话默认放行,
- * 与 useChatStreaming effectiveTools 里的硬编码列表保持一致(单一来源,防漂移)。
+ * 与 useChatStreaming effectiveTools 保持一致(单一来源,防漂移)。
  */
 
 import { create } from 'zustand';
 
-/** 常驻工具:不依赖勾选,任何会话都放行(文件 7 个 + Todo 8 个 + 元工具 3 个 + 交互 1 个) */
-export const RESIDENT_TOOLS = [
-	// 文件工具
+/** 文件工具:修改文件任务至少需要读、写、替换、搜索能力(useChatStreaming / ChatWindow 共用) */
+export const FILE_TOOLS = [
 	'ReadFile',
+	'ReadFileRange',
 	'WriteFile',
 	'ReplaceInFile',
 	'ReplaceInFileRegex',
 	'SearchFiles',
 	'ListDir',
 	'DeleteFile',
-	// Todo 工具
+];
+
+/** Todo 工具:让 AI 主动管理任务清单,与用户 UI 操作对称 */
+export const TODO_TOOLS = [
 	'TodoAdd',
 	'TodoList',
 	'TodoToggle',
@@ -29,14 +32,15 @@ export const RESIDENT_TOOLS = [
 	'TodoSetPriority',
 	'TodoDelete',
 	'TodoClearCompleted',
-	// 元工具(auto-discovery)
-	'ListTools',
-	'GetToolDef',
-	// plan 审批
-	'SubmitPlan',
-	// 交互工具
-	'AskUser',
 ];
+
+/** 元工具(auto-discovery)+ plan 审批 + 交互工具 */
+export const META_TOOLS = ['ListTools', 'GetToolDef', 'LoadSkill', 'SubmitPlan', 'AskUser'];
+
+/** 常驻工具:不依赖勾选,任何会话都放行(文件 8 + Todo 8 + 元/plan/交互 5)
+ *  单一来源:useChatStreaming effectiveTools / ChatWindow 默认 agent /
+ *  ToolGrantDialog 勾选面板均从此派生,防漂移 */
+export const RESIDENT_TOOLS = [...FILE_TOOLS, ...TODO_TOOLS, ...META_TOOLS];
 
 export const RESIDENT_TOOL_SET = new Set(RESIDENT_TOOLS);
 

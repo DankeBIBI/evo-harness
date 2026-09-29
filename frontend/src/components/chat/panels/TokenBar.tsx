@@ -84,7 +84,7 @@ export function TokenBar({
 
 	const hitPct = Math.min(Math.max(hitRate * 100, 0), 100);
 
-	// 缓存命中占比 = cacheRead / (cacheRead + 实际新增输入)
+	// 缓存命中占比 = cacheRead / (cacheRead + cacheCreation + 实际新增输入)
 	const hasCache = cacheReadTokens > 0 || cacheCreationTokens > 0;
 	const hasIO = inputTokens > 0 || outputTokens > 0;
 

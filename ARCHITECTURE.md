@@ -301,6 +301,8 @@ Cache: &CacheConfig{
 
 ## 八、文件规模统计
 
+> 注：以下 `services/` 为历史 Go 后端结构，当前仓库已不包含该目录；缓存子系统已迁移为前端实现（`frontend/src/lib/cache/`）。
+
 ```
 services/cache/                            789 行
   prefix_shape.go                          156 行
@@ -365,10 +367,10 @@ services/chat_service.go                   948 行  (含子代理派遣逻辑)
 | 方向 | 文件位置 |
 | --- | --- |
 | 新增 Provider | `services/provider/provider_<brand>.go` + `provider.Registry.Register()` |
-| 新增缓存策略 | `services/cache/` 下新增子模块（如 `speculative_cache.go`） |
-| 调整默认价格表 | `services/cache/cost.go` 的 `modelPriceTable` |
-| 调整缓存参数 | `models/cache.go` 的 `DefaultCacheConfig()` |
-| 新增压缩算法 | `services/cache/compact.go` 的 `PlanCompaction` |
+| 新增缓存策略 | `frontend/src/lib/cache/` 下新增子模块 |
+| 调整默认价格表 | `frontend/src/lib/cache/cost.ts` 的模型价格表 |
+| 调整缓存参数 | `frontend/src/lib/cache/manager.ts` 的 `DEFAULT_CACHE_CONFIG` |
+| 新增压缩算法 | `frontend/src/lib/cache/compact.ts` 的 `planCompaction` |
 | 前端 TokenBar 样式 | `frontend/src/components/chat/TokenBar.tsx` |
 | 前端缓存命中弹层 | `frontend/src/components/chat/TokenStats.tsx` |
 

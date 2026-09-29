@@ -10,6 +10,17 @@
 
 import type { ToolResult } from '@/lib/tools/base';
 import type { QueuedMessage } from './queueManager';
+import type { Message } from '@/stores/chatStore';
+
+/** 原生 tool_call 跨 chunk 累积缓冲（按 index 合并，finished=true 才执行） */
+export interface NativeCallBuf {
+  /** 后端传来的 anchor，表示 toolCall 出现时累计 content 字符数 */
+  anchor?: number;
+  id: string;
+  name: string;
+  args: string;
+  finished: boolean;
+}
 
 export interface StreamingContext {
   // -- Refs（跨模块共享的 mutable 状态，避免闭包陷阱） --
@@ -40,6 +51,8 @@ export interface StreamingContext {
   lastSentToolModeRef: React.MutableRefObject<'auto' | 'edit' | 'plan'>;
   /** 消息队列 — 流式期间用户发的新消息暂存于此 */
   messageQueueRef: React.MutableRefObject<QueuedMessage[]>;
+  /** 原生 tool_call 累积器（跨 chunk 累积，按 index 合并）— stop 时统一清理 */
+  nativeToolCallsRef: React.MutableRefObject<Map<number, NativeCallBuf>>;
   /** 纯 AI 输出（不含 tool_result 注入），存入 Message.rawContent 供回显/日志 */
   originalAiContentRef: React.MutableRefObject<string>;
   /** 待完成的工具调用计数 — 归零时触发 sendContinuation */
@@ -52,6 +65,8 @@ export interface StreamingContext {
   streamingContentRef: React.MutableRefObject<string>;
   /** 当前流式消息 ID — 非 null 表示正在流式中，null 表示空闲 */
   streamingIdRef: React.MutableRefObject<null | string>;
+  /** streamingRawContent rAF 节流句柄 — stop 时取消，避免陈旧内容覆盖 */
+  streamingRawRafIdRef: React.MutableRefObject<number | null>;
   /** 是否正在等待续传返回 — 防止重复触发 sendContinuation */
   waitingForContinuationRef: React.MutableRefObject<boolean>;
 
@@ -84,7 +99,7 @@ export interface StreamingContext {
   updateMessage: (
     convId: string,
     msgId: string,
-    update: Partial<{ content: string; rawContent: string }>,
+  update: Partial<Pick<Message, 'content' | 'rawContent' | 'providerContentBlocks' | 'providerTranscript' | 'reasoningDetails'>>,
   ) => void;
   /** 调用后端 CancelChat 真正中断 HTTP stream */
   cancelChatOnBackend?: (agentId: string, conversationId: string) => Promise<boolean>;
@@ -121,12 +136,14 @@ export function createStreamingContext(
     isProcessingQueueRef: React.MutableRefObject<boolean>;
     lastSentToolModeRef: React.MutableRefObject<'auto' | 'edit' | 'plan'>;
     messageQueueRef: React.MutableRefObject<QueuedMessage[]>;
+    nativeToolCallsRef: React.MutableRefObject<Map<number, NativeCallBuf>>;
     originalAiContentRef: React.MutableRefObject<string>;
     pendingToolResultsRef: React.MutableRefObject<number>;
     responseTimeoutRef: React.MutableRefObject<null | ReturnType<typeof setTimeout>>;
     sendContinuationRef: React.MutableRefObject<(() => Promise<void>) | null>;
     streamingContentRef: React.MutableRefObject<string>;
     streamingIdRef: React.MutableRefObject<null | string>;
+    streamingRawRafIdRef: React.MutableRefObject<number | null>;
     waitingForContinuationRef: React.MutableRefObject<boolean>;
     setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
     setStreamingContent: (v: string) => void;
@@ -139,7 +156,7 @@ export function createStreamingContext(
     updateMessage: (
       convId: string,
       msgId: string,
-      update: Partial<{ content: string; rawContent: string }>,
+    update: Partial<Pick<Message, 'content' | 'rawContent' | 'providerContentBlocks' | 'providerTranscript' | 'reasoningDetails'>>,
     ) => void;
     onFeedback?: (message: string) => void;
     onAgentNodesFinalize?: (isError: boolean) => void;
@@ -162,12 +179,14 @@ export function createStreamingContext(
     isProcessingQueueRef: overrides.isProcessingQueueRef,
     lastSentToolModeRef: overrides.lastSentToolModeRef,
     messageQueueRef: overrides.messageQueueRef,
+    nativeToolCallsRef: overrides.nativeToolCallsRef,
     originalAiContentRef: overrides.originalAiContentRef,
     pendingToolResultsRef: overrides.pendingToolResultsRef,
     responseTimeoutRef: overrides.responseTimeoutRef,
     sendContinuationRef: overrides.sendContinuationRef,
     streamingContentRef: overrides.streamingContentRef,
     streamingIdRef: overrides.streamingIdRef,
+    streamingRawRafIdRef: overrides.streamingRawRafIdRef,
     waitingForContinuationRef: overrides.waitingForContinuationRef,
     // setters
     setIsPaused: overrides.setIsPaused,

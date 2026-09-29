@@ -11,9 +11,7 @@ import {
 	Bot,
 	ChevronDown,
 	FolderOpen,
-	GitBranch,
 	ListTodo,
-	Pencil,
 	Plus,
 	Send,
 	Sparkles,
@@ -22,46 +20,21 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useShallow } from "zustand/react/shallow";
+
 import { useSkillStore } from "@/stores/skillStore";
 import { useTodoStore } from "@/stores/todoStore";
 import { useAgentStore } from "@/stores/agentStore";
 
 import type { ChatFeedbackItem } from "@/components/chat/lib/chatFeedback";
 import { AgentMentionPopover } from "@/components/chat/inputs/AgentMentionPopover";
-import { PromptMenu } from "@/components/chat/inputs/PromptMenu";
 import { ReasoningLevelSlider } from "@/components/chat/panels/ReasoningLevelSlider";
 import { SkillMentionPopover } from "@/components/chat/inputs/SkillMentionPopover";
 import { TokenBar } from "@/components/chat/panels/TokenBar";
 import { TodoList } from "@/components/chat/panels/TodoList";
-
-/** 估算文本 Token 数（cl100k_base 近似: 中文 ~0.6, 英文 ~0.75/4字符, 代码符号 ~0.3）
- *  与 useChatStreaming.estimateTokens 保持一致 */
-function estimateTokens(text: string): number {
-	if (!text) return 0;
-	const chineseChars = (text.match(/\p{Script=Han}/gu) || []).length;
-	const englishMatches = text.match(/[a-z]+/gi) || [];
-	const englishTokens = englishMatches.reduce(
-		(sum, w) => sum + Math.ceil(w.length / 4),
-		0,
-	);
-	const englishChars = englishMatches.reduce((sum, w) => sum + w.length, 0);
-	const codeChars = (text.match(/[{}\[\]()=;:<>`~!@#$%^&*+\-|\\/]/g) || [])
-		.length;
-	// 扣除已归类的中文/英文字母/代码符号，剩余为数字/空格/标点/emoji 等
-	const otherChars = Math.max(
-		0,
-		[...text].length - chineseChars - englishChars - codeChars,
-	);
-	return Math.ceil(
-		chineseChars * 0.6 +
-			englishTokens * 0.75 +
-			codeChars * 0.3 +
-			otherChars * 0.25,
-	);
-}
+import { estimateTokens } from "@/lib/tokenEstimate";
 
 /** 捕获触发元素的中心坐标并设置为 Dialog 动画原点 */
 function captureOrigin(e: React.MouseEvent) {
@@ -184,7 +157,6 @@ function stripTrailingChar(editable: HTMLDivElement, char: string): void {
 }
 
 interface ChatInputProps {
-	autoApplyFileChanges: boolean;
 	centered?: boolean;
 	currentFilePath?: string;
 	currentConversationId?: string | null;
@@ -222,7 +194,6 @@ interface ChatInputProps {
 	onSkipCodeChange?: () => void;
 	onStop: () => void;
 	onStopAndSend?: () => void;
-	onToggleAutoApply: () => void;
 	projectPath: string;
 	selectedModel: Model | null;
 	showFileMention: boolean;
@@ -398,7 +369,6 @@ export function buildSendArgs(
 }
 
 export function ChatInput({
-	autoApplyFileChanges,
 	centered = false,
 	currentFilePath,
 	currentConversationId,
@@ -424,7 +394,6 @@ export function ChatInput({
 	onSkipCodeChange,
 	onStop,
 	onStopAndSend,
-	onToggleAutoApply,
 	projectPath,
 	selectedModel,
 	showFileMention,
@@ -437,11 +406,9 @@ export function ChatInput({
 	tokenStats,
 	contextWindow = 0,
 }: ChatInputProps) {
-	const pendingCount = getPendingChangesCount();
-	const draftInputTokens = estimateTokens(input);
+	/** 草稿 token 估算(仅 input 变化时重算) */
+	const draftInputTokens = useMemo(() => estimateTokens(input), [input]);
 	const isStreaming = isStreamingProp ?? false;
-	const autoRoute = useSettingsStore((s) => s.autoRoute);
-	const setAutoRoute = useSettingsStore((s) => s.setAutoRoute);
 	const defaultAgentId = useAgentStore((s) => s.selectedAgentId);
 	const isDefaultAgent = Boolean(
 		selectedAgent && defaultAgentId && selectedAgent.id === defaultAgentId,
@@ -500,17 +467,23 @@ export function ChatInput({
 	 * 用 ref 记上一次 AI todo 数量,只在新增加时触发,避免重复展开
 	 */
 	const aiTodoCountRef = useRef(0);
-	const aiTodos = useTodoStore((s) =>
-		s.todos.filter(
-			(t) =>
-				t.source === "ai" &&
-				(!currentConversationId || t.conversationId === currentConversationId),
+	// useShallow:filter 每次返回新数组,浅比较避免无关 store 更新触发本组件重渲染
+	const aiTodos = useTodoStore(
+		useShallow((s) =>
+			s.todos.filter(
+				(t) =>
+					t.source === "ai" &&
+					(!currentConversationId ||
+						t.conversationId === currentConversationId),
+			),
 		),
 	);
-	const todos = useTodoStore((s) =>
-		currentConversationId
-			? s.todos.filter((t) => t.conversationId === currentConversationId)
-			: s.todos,
+	const todos = useTodoStore(
+		useShallow((s) =>
+			currentConversationId
+				? s.todos.filter((t) => t.conversationId === currentConversationId)
+				: s.todos,
+		),
 	);
 	useEffect(() => {
 		if (aiTodos.length > aiTodoCountRef.current) {
@@ -667,6 +640,24 @@ export function ChatInput({
 		onInputChange(newText);
 	}, [onInputChange, onShowFileMention]);
 
+	/** 统一发送入口(Enter 与发送按钮共用);依赖含 input,避免回车发出过期文本 */
+	const doSend = useCallback(() => {
+		onSend?.(buildSendArgs(input, editableRef.current));
+	}, [input, onSend]);
+
+	/** 流式期间加入队列并清空输入框 */
+	const doEnqueue = useCallback(() => {
+		if (!editableRef.current || !onEnqueueMessage) return;
+		onEnqueueMessage(
+			currentConversationId ?? "",
+			input,
+			extractFileMentions(editableRef.current),
+			extractSkillMentions(editableRef.current),
+		);
+		onInputChange("");
+		editableRef.current.innerHTML = "";
+	}, [currentConversationId, input, onEnqueueMessage, onInputChange]);
+
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
 			// 弹层打开时由弹层自身处理 Esc/Enter/Up/Down
@@ -689,7 +680,7 @@ export function ChatInput({
 			}
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
-				onSend?.(buildSendArgs(input, editableRef.current));
+				doSend();
 				return;
 			}
 			onKeyDown(e);
@@ -699,7 +690,8 @@ export function ChatInput({
 			showAgentMention,
 			showSkillMention,
 			onShowFileMention,
-			onSend,
+			resetMentionState,
+			doSend,
 			onKeyDown,
 		],
 	);
@@ -748,7 +740,7 @@ export function ChatInput({
 		<div className="shrink-0 border-t bg-card px-[10px] py-3 w-full mt-auto flex flex-col">
 			{showTodo && todos.length > 0 && (
 				<TodoList
-					className="  max-h-64 shrink-0 overflow-auto rounded-lg border bg-background"
+					className="max-h-64 shrink-0 overflow-auto rounded-lg border bg-background"
 					conversationId={currentConversationId ?? undefined}
 				/>
 			)}
@@ -790,7 +782,7 @@ export function ChatInput({
 					</div>
 				)}
 
-				<div className="relative min-h-0 flex-1 ">
+				<div className="relative min-h-0 flex-1">
 					<div
 						className="h-full max-h-full cursor-text overflow-y-auto whitespace-pre-wrap break-words px-3 pt-3 pb-1 text-sm text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
 						contentEditable
@@ -921,24 +913,9 @@ export function ChatInput({
 						disabled={false}
 						onClick={() => {
 							if (isStreaming && onEnqueueMessage) {
-								const fileMentions = editableRef.current
-									? extractFileMentions(editableRef.current)
-									: [];
-								const skillMentions = editableRef.current
-									? extractSkillMentions(editableRef.current)
-									: [];
-								onEnqueueMessage(
-									currentConversationId ?? "",
-									input,
-									fileMentions,
-									skillMentions,
-								);
-								onInputChange("");
-								if (editableRef.current) {
-									editableRef.current.innerHTML = "";
-								}
+								doEnqueue();
 							} else {
-								onSend?.(buildSendArgs(input, editableRef.current));
+								doSend();
 							}
 						}}
 						size="icon"
@@ -951,10 +928,10 @@ export function ChatInput({
 						)}
 					</Button>
 
-					{/* 第二行: 自动档相关 (自动队列/路由/编辑 + ToolMode + Todo + 附件) */}
+					{/* 第二行: 项目上下文 + 面板切换 / ToolMode + Todo + 附件 */}
 					<div className="bg-border/60 mx-1 h-px w-full basis-full" />
 					<Button
-						className="h-7 gap-1 p-2 text-xs bg-background mt-2 "
+						className="h-7 gap-1 p-2 text-xs bg-background mt-2"
 						onClick={onShowProjectDialog}
 						size="sm"
 						title={projectPath || "选择项目"}
@@ -965,36 +942,11 @@ export function ChatInput({
 						</span>
 					</Button>
 
-					<PromptMenu
-						currentFilePath={currentFilePath}
-						projectPath={projectPath}
-					/>
-					{/* 第二行后半段:自动档 / 面板切换 / ToolMode 聚成一组,靠 ml-auto 与左侧项目/PromptMenu 分开。
+					{/* 第二行后半段:面板切换 / ToolMode 聚成一组,靠 ml-auto 与左侧项目按钮分开。
 							    不是"推最右",而是"左右分组"——左侧是项目上下文,右侧是工具/模式切换。 */}
-					<Button
-						className="h-7 w-7 ml-auto"
-						onClick={() => setAutoRoute(!autoRoute)}
-						size="icon"
-						title={
-							autoRoute
-								? "自动任务路由: 开启 (统一入口分发)"
-								: "自动任务路由: 关闭"
-						}
-						variant={autoRoute ? "secondary" : "ghost"}>
-						<GitBranch className="h-5 w-5" />
-					</Button>
-
-					<Button
-						className="h-7 w-7"
-						onClick={onToggleAutoApply}
-						size="icon"
-						title={autoApplyFileChanges ? "自动编辑: 开启" : "自动编辑: 关闭"}
-						variant={autoApplyFileChanges ? "secondary" : "ghost"}>
-						<Pencil className="h-5 w-5" />
-					</Button>
 					{/* TodoList 折叠面板切换 */}
 					<Button
-						className="h-7 w-7"
+						className="h-7 w-7 ml-auto"
 						onClick={() => setShowTodo(!showTodo)}
 						size="icon"
 						title={showTodo ? "任务清单: 显示中(再点折叠)" : "任务清单: 折叠"}

@@ -1,10 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 
 import { AgentOrchestrationGraph } from "@/components/agent/AgentOrchestrationGraph";
-import {
-	CodeReviewPanel,
-	type FileChange,
-} from "@/components/editor/CodeReviewPanel";
+import type { FileChange } from "@/components/editor/CodeReviewPanel";
 import { CodeDiffViewer } from "@/components/file/CodeDiffViewer";
 import { useAgentStore } from "@/stores/agentStore";
 import { Message, useChatStore } from "@/stores/chatStore";
@@ -13,8 +10,8 @@ import type { FileMentionReference } from "@/components/chat/hooks/useChatWorksp
 import { useModelStore } from "@/stores/modelStore";
 import { usePromptStore } from "@/stores/promptStore";
 import { useSkillStore } from "@/stores/skillStore";
+import { useFileReviewStore } from "@/stores/fileReviewStore";
 import { selectProject, loadRootName } from "@/lib/fs/project-file-service";
-import { useToolPermissionStore } from "@/stores/toolPermissionStore";
 import {
 	Bot,
 	Check,
@@ -52,7 +49,8 @@ import {
 	partitionExpiredFeedback,
 	type ChatFeedbackItem,
 } from "@/components/chat/lib/chatFeedback";
-import { setModelConfig, setToolPermissionChecker } from "@/lib/tools/registry";
+import { setModelConfig } from "@/lib/tools/registry";
+import { FILE_TOOLS } from "@/stores/sessionToolStore";
 interface ChatAgent {
 	category: string;
 	children?: string[];
@@ -97,15 +95,7 @@ const fallbackAgents: ChatAgent[] = [
 		name: "通用助手",
 		role: "你是一个多用途对话助手",
 		skills: [],
-		tools: [
-			"ReadFile",
-			"WriteFile",
-			"ReplaceInFile",
-			"ReplaceInFileRegex",
-			"SearchFiles",
-			"ListDir",
-			"DeleteFile",
-		],
+		tools: [...FILE_TOOLS],
 	},
 	{
 		category: "coding",
@@ -116,15 +106,7 @@ const fallbackAgents: ChatAgent[] = [
 		name: "代码助手",
 		role: "你是一个专业的代码助手，擅长代码生成、审查和优化",
 		skills: [],
-		tools: [
-			"ReadFile",
-			"WriteFile",
-			"ReplaceInFile",
-			"ReplaceInFileRegex",
-			"SearchFiles",
-			"ListDir",
-			"DeleteFile",
-		],
+		tools: [...FILE_TOOLS],
 	},
 	{
 		category: "translation",
@@ -135,27 +117,8 @@ const fallbackAgents: ChatAgent[] = [
 		name: "翻译专家",
 		role: "你是一个专业的翻译专家",
 		skills: [],
-		tools: [
-			"ReadFile",
-			"WriteFile",
-			"ReplaceInFile",
-			"ReplaceInFileRegex",
-			"SearchFiles",
-			"ListDir",
-			"DeleteFile",
-		],
+		tools: [...FILE_TOOLS],
 	},
-];
-
-/** 基础文件工具：保证“读完文件后继续写入”链路完整 */
-const BASIC_FILE_TOOLS = [
-	"ReadFile",
-	"WriteFile",
-	"ReplaceInFile",
-	"ReplaceInFileRegex",
-	"SearchFiles",
-	"ListDir",
-	"DeleteFile",
 ];
 
 function ChatWindowImpl() {
@@ -202,7 +165,7 @@ function ChatWindowImpl() {
 		return () => window.clearInterval(timer);
 	}, [chatFeedback.length]);
 
-	const [showCodeReviewPanel, setShowCodeReviewPanel] = useState(false);
+	// 2026-08-31: showCodeReviewPanel / setShowCodeReviewPanel 已迁到 fileReviewStore
 	const [input, setInput] = useState("");
 
 	const { agents, fetchAgents, selectAgent, selectedAgentId } = useAgentStore();
@@ -238,13 +201,11 @@ function ChatWindowImpl() {
 
 	const {
 		applyCodeChanges,
-		autoApplyFileChanges,
 		confirmAllCodeChanges,
 		getPendingChangesCount,
 		pendingCodeChange,
 		setPendingCodeChange,
 		skipCodeChange,
-		toggleAutoApply,
 	} = useChatCodeApply();
 
 	// P1-2 (2026-07-10): 文件变更面板 —— 状态/回调抽到 hook, 渲染挂在右栏"变更"tab
@@ -284,6 +245,8 @@ function ChatWindowImpl() {
 	const setRightSidebarVisible = useLayoutStore(
 		(s) => s.setRightSidebarVisible,
 	);
+	// 2026-08-31: fileReviewStore 共享 actions(原 showCodeReviewPanel 本地 state 已迁出)
+	const addFileReviewChanges = useFileReviewStore((s) => s.addChanges);
 	// (2026-08-18) 统一日志弹窗 actions
 	const toggleUnifiedLog = useLayoutStore((s) => s.toggleUnifiedLog);
 	const openUnifiedLog = useLayoutStore((s) => s.openUnifiedLog);
@@ -336,7 +299,8 @@ function ChatWindowImpl() {
 						role: agent.role || "",
 						skills: agent.skills || [],
 						// 确保已有部分工具时也补齐基础文件写入链路
-						tools: [...new Set([...(agent.tools || []), ...BASIC_FILE_TOOLS])],
+						// 仅 UI 展示用;执行面以 sessionToolStore.RESIDENT_TOOLS 为准(streaming 层必并)
+					tools: [...new Set([...(agent.tools || []), ...FILE_TOOLS])],
 					}))
 				: fallbackAgents,
 		[agents],
@@ -373,11 +337,6 @@ function ChatWindowImpl() {
 			supportsVision: selectedModel.supportsVision,
 		});
 	}, [selectedModel]);
-
-	const { getPermission } = useToolPermissionStore();
-	useEffect(() => {
-		setToolPermissionChecker(getPermission);
-	}, [getPermission]);
 
 	useEffect(() => {
 		const agentId = searchParams.get("agentId");
@@ -438,6 +397,7 @@ function ChatWindowImpl() {
 			fileMentionsSnapshot,
 			mPrompts,
 			history,
+			modelOptions,
 		) =>
 			buildWorkspaceMessage(
 				content,
@@ -446,6 +406,7 @@ function ChatWindowImpl() {
 				fileMentionsSnapshot ?? [],
 				mPrompts,
 				history,
+				modelOptions,
 			),
 		currentConversation,
 		currentFilePath,
@@ -578,19 +539,16 @@ function ChatWindowImpl() {
 						} catch {
 							// ignore
 						}
-						setReviewChanges((prev) => {
-							if (prev.some((c) => c.id === call.id)) return prev;
-							return [
-								...prev,
-								{
-									filePath,
-									id: call.id,
-									newContent,
-									originalContent,
-									status: "pending" as const,
-								},
-							];
-						});
+						// 2026-08-31: 用 store.addChanges 自动去重 + 切 review tab
+						addFileReviewChanges([
+							{
+								filePath,
+								id: call.id,
+								newContent,
+								originalContent,
+								status: "pending" as const,
+							},
+						]);
 					})();
 				}
 			}
@@ -602,6 +560,19 @@ function ChatWindowImpl() {
 	});
 
 	const conversationTokenStats = currentConversation?.tokenStats ?? tokenStats;
+
+	/** M1 (2026-09-06): 流式结束时清理工具调用缓存 ref,防止跨会话无限增长
+	 *  toolStartMsRef / toolOriginalContentRef / reviewedToolCallIdsRef 均为长生命周期
+	 *  ChatWindow 持有的 Map/Set,旧实现无任何 clear(),每个工具 ID 一条记录永久残留 */
+	const prevStreamingIdRef = useRef(streamingId);
+	useEffect(() => {
+		if (prevStreamingIdRef.current && !streamingId) {
+			toolStartMsRef.current.clear();
+			toolOriginalContentRef.current.clear();
+			reviewedToolCallIdsRef.current.clear();
+		}
+		prevStreamingIdRef.current = streamingId;
+	}, [streamingId]);
 
 	/** 最近一条 assistant 消息的原始 AI 输出（用于统一日志弹窗的"原"tab） */
 	const latestRawContent = useMemo(() => {
@@ -647,11 +618,8 @@ function ChatWindowImpl() {
 		lastProjectPathRef.current = projectPath;
 
 		applyCodeChanges(latestAssistantMsg.content, projectPath)
-			.then(({ appliedCount, changes }) => {
-				if (appliedCount > 0) {
-					addChatFeedback(`已自动应用 ${appliedCount} 个文件修改`);
-				}
-				// Sync changes into CodeReviewPanel
+			.then(({ changes }) => {
+				// 2026-08-31: 同步变更到 fileReviewStore(左栏 CodeReviewPanel 订阅)
 				if (changes && changes.length > 0) {
 					const fileChanges: FileChange[] = changes.map((change, idx) => ({
 						id: `chat-${Date.now()}-${idx}`,
@@ -660,16 +628,8 @@ function ChatWindowImpl() {
 						newContent: change.newContent,
 						status: "pending" as const,
 					}));
-					setReviewChanges((prev) => {
-						const existing = new Set(prev.map((p) => p.filePath));
-						const newOnes = fileChanges.filter(
-							(f) => !existing.has(f.filePath),
-						);
-						return [...prev, ...newOnes];
-					});
-					if (fileChanges.length > 0 && !showCodeReviewPanel) {
-						setShowCodeReviewPanel(true);
-					}
+					// store.addChanges 内置去重 + 自动切 review tab
+					addFileReviewChanges(fileChanges);
 				}
 			})
 			.catch((error) => {
@@ -680,7 +640,7 @@ function ChatWindowImpl() {
 		streamingId,
 		projectPath,
 		applyCodeChanges,
-		showCodeReviewPanel,
+		addFileReviewChanges,
 	]);
 
 	const handleSend = async (args?: {
@@ -753,12 +713,8 @@ function ChatWindowImpl() {
 	return (
 		<>
 			<ChatLayout
-				changes={reviewChanges}
-				expanded={fileChangesExpanded}
-				onDiscard={handleDiscardFileChange}
-				onDiscardAll={handleDiscardAllFileChanges}
-				onExpandedChange={setFileChangesExpanded}
-				onFileContentToInput={(path) => {
+
+			onFileContentToInput={(path) => {
 					// 关键修复:不再把文件内容塞进 input(截断会丢信息+浪费 token+污染上下文)
 					// 改为插入 @[path] 引用,让 AI 用 ReadFile 工具自己读
 					setInput((prev) => {
@@ -830,7 +786,6 @@ function ChatWindowImpl() {
 					)}
 
 					<ChatInput
-						autoApplyFileChanges={autoApplyFileChanges}
 						centered={!hasMessages}
 						currentFilePath={currentFilePath}
 						currentConversationId={currentConversationId}
@@ -881,7 +836,6 @@ function ChatWindowImpl() {
 						onSkipCodeChange={skipCodeChange}
 						onStop={handleStop}
 						onStopAndSend={handleStopAndSend}
-						onToggleAutoApply={toggleAutoApply}
 						projectPath={projectPath}
 						selectedModel={selectedModel}
 						showFileMention={showFileMention}
@@ -985,41 +939,8 @@ function ChatWindowImpl() {
 					</div>
 				)}
 
-				{reviewChanges.length > 0 && (
-					<CodeReviewPanel
-						changes={reviewChanges}
-						collapsed={!showCodeReviewPanel}
-						onAcceptChange={async (change) => {
-							try {
-								const { WriteFile } =
-									await import("@/lib/hostServices/FileService");
-								await WriteFile(change.filePath, change.newContent);
-								setReviewChanges((prev) =>
-									prev.map((c) =>
-										c.id === change.id
-											? { ...c, status: "accepted" as const }
-											: c,
-									),
-								);
-								addChatFeedback(`已接受: ${change.filePath}`);
-							} catch (error) {
-								addChatFeedback(`保存失败: ${error}`);
-							}
-						}}
-						onRejectChange={(change) => {
-							setReviewChanges((prev) =>
-								prev.map((c) =>
-									c.id === change.id
-										? { ...c, status: "rejected" as const }
-										: c,
-								),
-							);
-						}}
-						onToggleCollapse={() =>
-							setShowCodeReviewPanel(!showCodeReviewPanel)
-						}
-					/>
-				)}
+				{/* 2026-08-31: CodeReviewPanel 已迁至左栏 SessionSidebar(review tab),
+				   主区不再挂载。数据通过 fileReviewStore 共享 */}
 
 				<UnifiedLogDialog
 					debugLogs={debugLogs}

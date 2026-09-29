@@ -141,36 +141,36 @@ export function SessionSidebar({ onCreateConversation }: SessionSidebarProps) {
 						会话
 					</span>
 
-				<Button
-					aria-label="新建会话"
-					className="bg-muted/40 hover:bg-muted text-muted-foreground h-6 gap-1 rounded-md px-1.5 text-xs"
-					onClick={onCreateConversation}
-					size="sm"
-					variant="ghost">
-					<span className="font-mono text-[10px]">新</span>
-					<span className="font-mono text-[10px]">Ctrl+N</span>
-				</Button>
-
-				<div className="ml-auto flex items-center gap-0.5">
 					<Button
-						aria-label="搜索会话"
-						className="text-muted-foreground hover:text-foreground h-6 w-6"
-						onClick={() => setShowSearch((prev) => !prev)}
-						size="icon"
-						variant={showSearch ? "secondary" : "ghost"}>
-						<Search className="h-[14px] w-[14px]" />
-					</Button>
-						<Button
-						aria-label="折叠为图标条"
-						className="text-muted-foreground hover:text-foreground h-6 w-6"
-						onClick={toggleCollapsed}
-						size="icon"
-						title="折叠为图标条"
+						aria-label="新建会话"
+						className="bg-muted/40 hover:bg-muted text-muted-foreground h-6 gap-1 rounded-md px-1.5 text-xs"
+						onClick={onCreateConversation}
+						size="sm"
 						variant="ghost">
-						<PanelLeftClose className="h-[14px] w-[14px]" />
+						<span className="font-mono text-[10px]">新</span>
+						<span className="font-mono text-[10px]">Ctrl+N</span>
 					</Button>
+
+					<div className="ml-auto flex items-center gap-0.5">
+						<Button
+							aria-label="搜索会话"
+							className="text-muted-foreground hover:text-foreground h-6 w-6"
+							onClick={() => setShowSearch((prev) => !prev)}
+							size="icon"
+							variant={showSearch ? "secondary" : "ghost"}>
+							<Search className="h-[14px] w-[14px]" />
+						</Button>
+						<Button
+							aria-label="折叠为图标条"
+							className="text-muted-foreground hover:text-foreground h-6 w-6"
+							onClick={toggleCollapsed}
+							size="icon"
+							title="折叠为图标条"
+							variant="ghost">
+							<PanelLeftClose className="h-[14px] w-[14px]" />
+						</Button>
+					</div>
 				</div>
-			</div>
 
 			<div className="min-h-0 flex-1 border-t border-border/50">
 				<button

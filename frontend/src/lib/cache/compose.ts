@@ -1,6 +1,5 @@
 /**
  * Turn Tail Injection 拼接(lib/cache/compose)
- * - 与 Go services/cache/compose.go 1:1 迁移
  * - 动态信息(plan mode / memory update / background jobs)注入 user message 开头,
  *   不进 system prompt,避免破坏缓存前缀稳定性
  */

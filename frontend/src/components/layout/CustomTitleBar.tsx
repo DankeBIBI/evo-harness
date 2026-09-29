@@ -115,6 +115,13 @@ export function CustomTitleBar({
 	const runtimeAvailable =
 		typeof window !== "undefined" &&
 		!!(window as unknown as { runtime?: unknown }).runtime;
+	/** H5/浏览器下完全不传拖拽 style:仅 Wails 环境需要,让 DOM 上看不到 --wails-draggable 属性 */
+	const dragStyle: React.CSSProperties | undefined = runtimeAvailable
+		? DRAG_STYLE
+		: undefined;
+	const noDragStyle: React.CSSProperties | undefined = runtimeAvailable
+		? NO_DRAG_STYLE
+		: undefined;
 
 	/** 挂载时拉一次最大化状态,避免图标一开始就错 */
 	useEffect(() => {
@@ -166,7 +173,7 @@ export function CustomTitleBar({
 		<div
 			className="border-border/40 bg-background/80 flex h-9 shrink-0 items-center justify-between gap-2 border-b  backdrop-blur-md select-none"
 			onDoubleClick={handleDoubleClick}
-			style={DRAG_STYLE}>
+			style={dragStyle}>
 			<div className="flex h-full shrink-0 items-center gap-2 pr-2 px-2">
 				<span
 					aria-hidden
@@ -184,7 +191,7 @@ export function CustomTitleBar({
 			{/* 中(chat 页扩展):导航 + 会话标题 */}
 			{onChatPage && (
 				<>
-					<div className="flex shrink-0 items-center" style={NO_DRAG_STYLE}>
+						<div className="flex shrink-0 items-center" style={noDragStyle}>
 						<Button
 							aria-label="后退"
 							className="text-muted-foreground hover:text-foreground h-7 w-7"
@@ -216,18 +223,18 @@ export function CustomTitleBar({
 					</div>
 					<div
 						className="flex-1 flex items-center justify-center "
-						style={DRAG_STYLE}>
+						style={dragStyle}>
 						<div
 							className="w-full border-border/40 bg-muted/20 text-foreground/80 flex h-7 min-w-0  items-center gap-2 rounded-md border px-5 text-xs "
-							style={DRAG_STYLE}>
+							style={dragStyle}>
 							<span className="truncate">{title}</span>
 						</div>
 					</div>
 				</>
 			)}
 
-			{/* 右:chat 页扩展按钮 + 窗口管理 */}
-			<div className="flex h-full shrink-0 items-center" style={NO_DRAG_STYLE}>
+			{/* 右:chat 页扩展按钮 + 窗口管理(仅 Wails 环境显示三按钮) */}
+			<div className="flex h-full shrink-0 items-center" style={noDragStyle}>
 				{onChatPage && onToggleUnifiedLog && (
 					<button
 						aria-label={unifiedLogOpen ? "关闭统一日志" : "打开统一日志"}
@@ -243,34 +250,38 @@ export function CustomTitleBar({
 						<FileSearch className="h-[14px] w-[14px]" />
 					</button>
 				)}
-				<button
-					aria-label="最小化"
-					className="text-muted-foreground hover:bg-muted/60 hover:text-foreground flex h-full aspect-square items-center justify-center transition-colors"
-					data-titlebar-button
-					onClick={handleMinimize}
-					type="button">
-					<Minimize2 className="h-[14px] w-[14px]" />
-				</button>
-				<button
-					aria-label={isMaximised ? "还原" : "最大化"}
-					className="text-muted-foreground hover:bg-muted/60 hover:text-foreground flex h-full aspect-square items-center justify-center transition-colors"
-					data-titlebar-button
-					onClick={handleMaximizeToggle}
-					type="button">
-					{isMaximised ? (
-						<PictureInPicture2 className="h-[14px] w-[14px]" />
-					) : (
-						<Square className="h-[12px] w-[12px]" />
-					)}
-				</button>
-				<button
-					aria-label="关闭"
-					className="text-muted-foreground hover:bg-red-500/90 hover:text-white flex h-full aspect-square items-center justify-center transition-colors"
-					data-titlebar-button
-					onClick={handleClose}
-					type="button">
-					<X className="h-[14px] w-[14px]" />
-				</button>
+				{runtimeAvailable && (
+					<>
+						<button
+							aria-label="最小化"
+							className="text-muted-foreground hover:bg-muted/60 hover:text-foreground flex h-full aspect-square items-center justify-center transition-colors"
+							data-titlebar-button
+							onClick={handleMinimize}
+							type="button">
+							<Minimize2 className="h-[14px] w-[14px]" />
+						</button>
+						<button
+							aria-label={isMaximised ? "还原" : "最大化"}
+							className="text-muted-foreground hover:bg-muted/60 hover:text-foreground flex h-full aspect-square items-center justify-center transition-colors"
+							data-titlebar-button
+							onClick={handleMaximizeToggle}
+							type="button">
+							{isMaximised ? (
+								<PictureInPicture2 className="h-[14px] w-[14px]" />
+							) : (
+								<Square className="h-[12px] w-[12px]" />
+							)}
+						</button>
+						<button
+							aria-label="关闭"
+							className="text-muted-foreground hover:bg-red-500/90 hover:text-white flex h-full aspect-square items-center justify-center transition-colors"
+							data-titlebar-button
+							onClick={handleClose}
+							type="button">
+							<X className="h-[14px] w-[14px]" />
+						</button>
+					</>
+				)}
 			</div>
 		</div>
 	);

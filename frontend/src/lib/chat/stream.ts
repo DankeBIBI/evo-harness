@@ -31,6 +31,7 @@ export async function streamChat(
 	let textLen = 0;
 	// 2026-08-17:done 事件幂等触发标记,避免流末尾多条 finish_reason 重复回调
 	let streamDoneCalled = false;
+	let sawOpenAiTerminal = false;
 
 	const flushTool = (index: number): void => {
 		const acc = toolAcc.get(index);
@@ -158,15 +159,16 @@ export async function streamChat(
 							}
 						});
 					} else if (finishReason) {
-						// 2026-08-17 修复:'stop'/'length'/'content_filter' 等终态 finish_reason → 触发 onDone
-						// 之前未触发 → UI 永远停在 streaming,不知道何时收尾 assistant 消息
-						if (!streamDoneCalled) {
-							streamDoneCalled = true;
-							cb.onDone();
-						}
+						// OpenAI 的 usage 常在 finish_reason 后的独立 chunk 中，读完流再 done，
+						// 否则上层会先取消事件订阅而漏掉最终 token 统计。
+						sawOpenAiTerminal = true;
 					}
 				}
 			}
+		}
+		if (!provider.isAnthropic && sawOpenAiTerminal && !streamDoneCalled) {
+			streamDoneCalled = true;
+			cb.onDone();
 		}
 	} catch (error) {
 		// 2026-08-19: 之前是 no-op throw error 透传;加诊断日志便于追溯

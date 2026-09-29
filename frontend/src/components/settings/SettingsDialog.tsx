@@ -31,6 +31,7 @@ import "@material/web/button/filled-tonal-button.js";
 import { AgentManagerContent } from "../chat/layout/AgentManagerDialog";
 import GeneralSettingsView from "../../pages/settings/GeneralSettingsView";
 import ModelsSettingsView from "../../pages/settings/ModelsSettingsView";
+import PromptsSettingsView from "../../pages/settings/PromptsSettingsView";
 import SourcesSettingsView from "../../pages/settings/SourcesSettingsView";
 
 interface TabDef {
@@ -95,24 +96,22 @@ export function SettingsDialog() {
 	const tab = useSettingsDialogStore((s) => s.tab);
 	const setTab = useSettingsDialogStore((s) => s.setTab);
 
-	const activeDef = useMemo(
-		() => TABS.find((t) => t.key === tab) ?? TABS[0],
-		[tab],
-	);
-
 	return (
 		<Dialog onOpenChange={(v) => !v && close()} open={open}>
-			<DialogContent className="max-w-[85vw] min-h-0 max-h-[80vh] flex flex-col gap-0 p-0 overflow-hidden">
+			<DialogContent className="h-[80vh] max-w-[85vw] flex flex-col gap-0 p-0 overflow-hidden">
 				<div className="bg-card flex min-h-0 flex-1">
 					{/* 左侧 tab 栏(固定不滚动) */}
 					<div className="border-border/40 bg-muted/20 flex w-[200px] shrink-0 flex-col border-r">
-						<DialogHeader className="border-border/40 shrink-0 gap-0 border-b px-8 py-3">
-							<DialogTitle className="text-foreground/90 text font-medium tracking-normal">
+						<DialogHeader className="border-border/40 shrink-0 gap-0 border-b px-4 py-4">
+							<DialogTitle className="text-foreground flex items-center gap-2 text-lg font-semibold tracking-normal">
+								<SettingsIcon className="text-primary h-5 w-5" />
 								设置
 							</DialogTitle>
 						</DialogHeader>
-						<nav className="min-h-0 flex-1 overflow-hidden p-2" role="tablist">
-							<div className="text-muted-foreground mb-1 px-2 text-[16px] font-medium tracking-wider uppercase">
+						<nav
+						className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2"
+						role="tablist">
+							<div className="text-muted-foreground mb-1 shrink-0 px-2 text-[11px] font-medium tracking-wider uppercase">
 								自定义
 							</div>
 							{TABS.slice(0, 6).map((t) => (
@@ -124,7 +123,7 @@ export function SettingsDialog() {
 									onClick={() => setTab(t.key)}
 								/>
 							))}
-							<div className="text-muted-foreground mt-3 mb-1 px-2 text-[18px] font-medium tracking-wider uppercase">
+							<div className="text-muted-foreground mt-4 mb-1 shrink-0 px-2 text-[11px] font-medium tracking-wider uppercase">
 								全局
 							</div>
 							{TABS.slice(6).map((t) => (
@@ -143,12 +142,13 @@ export function SettingsDialog() {
 					<div className="flex-1 overflow-y-scroll">
 						{tab === "general" && <GeneralSettingsView />}
 						{tab === "models" && <ModelsSettingsView />}
+						{/* 提示词:独立管理页(2026-08-22 自聊天输入框迁移) */}
+						{tab === "prompts" && <PromptsSettingsView />}
 						{tab === "sources" && <SourcesSettingsView />}
 						{tab === "about" && <AboutView />}
-						{/* 6 类"自定义"全部复用 AgentManagerContent(category=tab) */}
+						{/* 其余"自定义"类复用 AgentManagerContent(category=tab) */}
 						{(tab === "agents" ||
 							tab === "skills" ||
-							tab === "prompts" ||
 							tab === "hooks" ||
 							tab === "mcp" ||
 							tab === "plugins") && (
@@ -180,7 +180,8 @@ function TabButton({
 		<button
 			aria-selected={active}
 			className={cn(
-				"flex h-7 w-full items-center gap-2 rounded-md px-2 text-xs transition-colors duration-150",
+				// min-h + padding:行高随全局字体令牌自适应,避免固定高度下文字溢出重叠
+				"flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors duration-150",
 				active
 					? "bg-primary/10 text-foreground font-medium"
 					: "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
@@ -188,8 +189,8 @@ function TabButton({
 			onClick={onClick}
 			role="tab"
 			type="button">
-			<Icon className="h-[14px] w-[14px] shrink-0" />
-			<span className="flex-1 text-left">{label}</span>
+			<Icon className="h-[15px] w-[15px] shrink-0" />
+			<span className="flex-1 truncate text-left">{label}</span>
 		</button>
 	);
 }

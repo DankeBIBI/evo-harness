@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KEYFORGE_MARKET — API Key 售卖 App · Material 3 · 5 Screens Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<style>
+/* ============================================================
+   KEYFORGE_MARKET — Material 3 (Material You) Dark Theme
+   Baseline tonal palette · Roboto · Elevation · State layers
+   Shape: pills 999 / cards 12 / fab 16 / chips 8
+   ============================================================ */
+
+:root,
+[data-theme="dark"] {
+  /* M3 tonal tokens (dark) */
+  --primary: #d0bcff;
+  --on-primary: #381e72;
+  --primary-container: #4f378b;
+  --on-primary-container: #eaddff;
+  --secondary: #ccc2dc;
+  --on-secondary: #332d41;
+  --secondary-container: #4a4458;
+  --on-secondary-container: #e8def8;
+  --tertiary: #efb8c8;
+  --on-tertiary: #492532;
+  --tertiary-container: #633b48;
+  --on-tertiary-container: #ffd8e4;
+  --error: #f2b8b5;
+  --on-error: #601410;
+  --error-container: #8c1d18;
+  --on-error-container: #f9dedc;
+  --surface: #141218;
+  --sc-lowest: #0f0d13;
+  --sc-low: #1d1b20;
+  --sc: #211f26;
+  --sc-high: #2b2930;
+  --sc-highest: #36343b;
+  --on-surface: #e6e0e9;
+  --on-surface-var: #cac4d0;
+  --outline: #938f99;
+  --outline-var: #49454f;
+  --inverse-surface: #e6e0e9;
+  --inverse-on-surface: #313033;
+
+  /* canvas / chrome */
+  --bg-deep: #0b0910;
+  --bg-radial-1: rgba(208,188,255,.07);
+  --bg-dot: #17141d;
+  --phone-border: #2e2a37;
+  --phone-shell-outer: #17141d;
+  --phone-shell-inner: #2e2a37;
+  --phone-shadow-rim: rgba(0,0,0,.6);
+  --btn-filled-hover: #dbd0ff;
+  --state-layer: rgba(230,224,239,.08);
+  --state-layer-strong: rgba(230,224,239,.14);
+  --state-layer-row: rgba(230,224,239,.05);
+  --state-layer-btn: rgba(208,188,255,.08);
+  --feature-mini-border: rgba(234,221,255,.5);
+
+  --roboto: 'Roboto', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', Consolas, monospace;
+
+  --elev1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15);
+  --elev2: 0 1px 2px rgba(0,0,0,.3), 0 2px 6px 2px rgba(0,0,0,.15);
+  --elev3: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15);
+}
+
+/* ============================================================
+   KEYFORGE_MARKET — Material You Baseline LIGHT tonal palette
+   (Google M3 spec, baseline scheme #6750a4)
+   ============================================================ */
+[data-theme="light"] {
+  --primary: #6750a4;
+  --on-primary: #ffffff;
+  --primary-container: #eaddff;
+  --on-primary-container: #21005d;
+  --secondary: #625b71;
+  --on-secondary: #ffffff;
+  --secondary-container: #e8def8;
+  --on-secondary-container: #1d192b;
+  --tertiary: #7d5260;
+  --on-tertiary: #ffffff;
+  --tertiary-container: #ffd8e4;
+  --on-tertiary-container: #31111d;
+  --error: #b3261e;
+  --on-error: #ffffff;
+  --error-container: #f9dedc;
+  --on-error-container: #410e0b;
+  --surface: #fef7ff;
+  --sc-lowest: #ffffff;
+  --sc-low: #f7f2fa;
+  --sc: #f3edf7;
+  --sc-high: #ece6f0;
+  --sc-highest: #e6e0e9;
+  --on-surface: #1c1b1f;
+  --on-surface-var: #49454f;
+  --outline: #79747e;
+  --outline-var: #cac4d0;
+  --inverse-surface: #313033;
+  --inverse-on-surface: #f4eff4;
+
+  /* canvas / chrome — soft mauve wash, M3 light shell */
+  --bg-deep: #f6eef9;
+  --bg-radial-1: rgba(103,80,164,.10);
+  --bg-dot: #d4cadc;
+  --phone-border: #d4cadc;
+  --phone-shell-outer: #ffffff;
+  --phone-shell-inner: #d4cadc;
+  --phone-shadow-rim: rgba(103,80,164,.18);
+  --btn-filled-hover: #7965af;
+  --state-layer: rgba(28,27,31,.08);
+  --state-layer-strong: rgba(28,27,31,.12);
+  --state-layer-row: rgba(28,27,31,.05);
+  --state-layer-btn: rgba(103,80,164,.10);
+  --feature-mini-border: rgba(103,80,164,.45);
+
+  --elev1: 0 1px 2px rgba(103,80,164,.10), 0 1px 3px 1px rgba(0,0,0,.08);
+  --elev2: 0 1px 2px rgba(103,80,164,.10), 0 2px 6px 2px rgba(0,0,0,.10);
+  --elev3: 0 1px 3px rgba(103,80,164,.10), 0 4px 8px 3px rgba(0,0,0,.10);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { background: var(--bg-deep); }
+
+body {
+  font-family: var(--roboto);
+  font-size: 14px;
+  color: var(--on-surface);
+  min-height: 100vh;
+  padding: 56px 40px 96px;
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -12%, var(--bg-radial-1), transparent),
+    radial-gradient(circle at 1px 1px, var(--bg-dot) 1px, transparent 0) 0 0 / 26px 26px,
+    var(--bg-deep);
+  transition:
+    background-color .35s cubic-bezier(.2,.7,.2,1),
+    color .35s cubic-bezier(.2,.7,.2,1);
+}
+
+::selection { background: var(--primary); color: var(--on-primary); }
+
+/* ---------- material symbols ---------- */
+
+.msr {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  display: inline-block;
+  white-space: nowrap;
+  letter-spacing: normal;
+  text-transform: none;
+  direction: ltr;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+.msr.fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+/* ---------- board head ---------- */
+
+.board-head {
+  max-width: 2160px;
+  margin: 0 auto 64px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--outline-var);
+  padding-bottom: 28px;
+}
+
+.board-title h1 {
+  font-size: clamp(28px, 3.4vw, 46px);
+  font-weight: 700;
+  letter-spacing: -.01em;
+  line-height: 1;
+}
+
+.board-title h1 em { font-style: normal; color: var(--primary); }
+
+.board-title p {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--on-surface-var);
+  letter-spacing: .04em;
+}
+
+.board-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.tag {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  color: var(--on-secondary-container);
+  background: var(--secondary-container);
+  padding: 7px 14px;
+  border-radius: 999px;
+}
+
+.tag.alt { background: var(--tertiary-container); color: var(--on-tertiary-container); }
+
+/* ---------- theme toggle (board head) ---------- */
+
+.board-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.theme-toggle {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--outline-var);
+  border-radius: 50%;
+  background: var(--sc-low);
+  color: var(--on-surface-var);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  transition:
+    background-color .35s cubic-bezier(.2,.7,.2,1),
+    border-color .35s cubic-bezier(.2,.7,.2,1),
+    color .25s ease-out,
+    box-shadow .25s ease-out;
+}
+
+.theme-toggle:hover { background: var(--state-layer); color: var(--primary); box-shadow: var(--elev1); }
+
+.theme-toggle .msr {
+  position: absolute;
+  font-size: 22px;
+  transition:
+    transform .5s cubic-bezier(.2,.7,.2,1),
+    opacity .3s ease-out;
+}
+
+/* default = dark theme → show moon (current) */
+[data-theme="dark"] .icon-sun,
+:root:not([data-theme]) .icon-sun {
+  opacity: 0;
+  transform: rotate(-90deg) scale(.4);
+}
+
+[data-theme="dark"] .icon-moon,
+:root:not([data-theme]) .icon-moon {
+  opacity: 1;
+  transform: rotate(0) scale(1);
+}
+
+/* light theme → show sun (current) */
+[data-theme="light"] .icon-sun {
+  opacity: 1;
+  transform: rotate(0) scale(1);
+}
+
+[data-theme="light"] .icon-moon {
+  opacity: 0;
+  transform: rotate(90deg) scale(.4);
+}
+
+/* ---------- canvas layout ---------- */
+
+.canvas {
+  max-width: 2160px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 56px 40px;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.screen-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  animation: rise .7s cubic-bezier(.2,.7,.2,1) backwards;
+}
+
+.screen-wrap:nth-child(1) { animation-delay: .05s; }
+.screen-wrap:nth-child(2) { animation-delay: .15s; }
+.screen-wrap:nth-child(3) { animation-delay: .25s; }
+.screen-wrap:nth-child(4) { animation-delay: .35s; }
+.screen-wrap:nth-child(5) { animation-delay: .45s; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(28px); } }
+
+.screen-label { font-size: 13px; color: var(--on-surface-var); letter-spacing: .06em; }
+.screen-label b { color: var(--primary); font-weight: 500; }
+
+/* ---------- phone chrome ---------- */
+
+.phone {
+  width: 375px;
+  height: 812px;
+  flex: none;
+  position: relative;
+  border-radius: 48px;
+  background: var(--surface);
+  border: 1px solid var(--phone-border);
+  box-shadow:
+    0 0 0 10px var(--phone-shell-outer),
+    0 0 0 11px var(--phone-shell-inner),
+    0 48px 90px var(--phone-shadow-rim);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    background-color .35s cubic-bezier(.2,.7,.2,1),
+    border-color .35s cubic-bezier(.2,.7,.2,1),
+    box-shadow .35s cubic-bezier(.2,.7,.2,1),
+    transform .25s ease-out;
+}
+
+.phone:hover { transform: translateY(-6px); }
+
+.notch {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 118px;
+  height: 30px;
+  border-radius: 20px;
+  background: #000;
+  z-index: 95;
+}
+
+.screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding-top: 46px; }
+
+.content { flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0 16px; }
+
+/* ---------- statusbar / appbar ---------- */
+
+.statusbar {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px 0 28px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.statusbar .icons { display: flex; gap: 5px; align-items: center; }
+.statusbar .msr { font-size: 16px; }
+
+.appbar {
+  height: 64px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.appbar-title { font-size: 22px; font-weight: 500; padding-left: 8px; }
+.spacer { flex: 1; }
+
+.ibtn {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--on-surface-var);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  position: relative;
+  transition: background .15s ease-out;
+}
+
+.ibtn:hover { background: var(--state-layer); }
+.ibtn.accent { color: var(--primary); }
+
+.dot-badge {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  border: 2px solid var(--surface);
+}
+
+.avatar-sm {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 8px;
+  cursor: pointer;
+}
+
+/* ---------- buttons ---------- */
+
+.btn-filled,
+.btn-tonal,
+.btn-outlined,
+.btn-text {
+  height: 40px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--roboto);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: box-shadow .15s ease-out, background .15s ease-out;
+}
+
+.btn-filled { background: var(--primary); color: var(--on-primary); }
+.btn-filled:hover { box-shadow: var(--elev1); background: var(--btn-filled-hover); }
+
+.btn-tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
+.btn-tonal:hover { box-shadow: var(--elev1); }
+
+.btn-outlined { background: transparent; color: var(--primary); border: 1px solid var(--outline); }
+.btn-outlined:hover { background: var(--state-layer-btn); }
+
+.btn-text { background: transparent; color: var(--primary); padding: 0 12px; }
+.btn-text:hover { background: var(--state-layer-btn); }
+
+.btn-block { width: 100%; height: 48px; font-size: 15px; }
+
+/* ---------- ripple ---------- */
+
+.ripple { position: relative; overflow: hidden; }
+
+.ripple-wave {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .14;
+  transform: scale(0);
+  animation: wave .55s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes wave { to { transform: scale(1); opacity: 0; } }
+
+/* ---------- cards ---------- */
+
+.card-outlined {
+  border: 1px solid var(--outline-var);
+  border-radius: 12px;
+  padding: 16px;
+  background: transparent;
+}
+
+.card-elevated {
+  border-radius: 12px;
+  background: var(--sc-low);
+  box-shadow: var(--elev1);
+  padding: 16px;
+}
+
+/* ---------- chips ---------- */
+
+.chips-row { display: flex; gap: 8px; overflow: hidden; padding: 4px 0 14px; }
+
+.chip-m3 {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--outline-var);
+  background: transparent;
+  color: var(--on-surface-var);
+  font-family: var(--roboto);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: background .15s ease-out;
+}
+
+.chip-m3:hover { background: var(--state-layer); }
+
+.chip-m3 .chk { font-size: 18px; display: none; }
+
+.chip-m3.selected {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  border-color: transparent;
+  padding: 0 12px;
+}
+
+.chip-m3.selected .chk { display: inline-block; }
+
+.assist-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.assist-chip.hot { background: var(--tertiary-container); color: var(--on-tertiary-container); }
+.assist-chip.new { background: var(--primary-container); color: var(--on-primary-container); }
+.assist-chip.sale { background: var(--error-container); color: var(--on-error-container); }
+
+/* ---------- search bar ---------- */
+
+.search {
+  height: 56px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--sc-high);
+  box-shadow: var(--elev1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 16px;
+  margin-top: 8px;
+  color: var(--on-surface-var);
+  font-size: 15px;
+  cursor: text;
+}
+
+.headline-block { padding: 22px 4px 14px; }
+
+.headline-block h1 { font-size: 24px; font-weight: 400; letter-spacing: 0; }
+
+.headline-block p { margin-top: 6px; font-size: 14px; color: var(--on-surface-var); }
+
+/* ---------- feature banner ---------- */
+
+.feature-card {
+  border-radius: 20px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  flex: none;
+  margin-bottom: 16px;
+  transition: box-shadow .2s ease-out;
+}
+
+.feature-card:hover { box-shadow: var(--elev2); }
+
+.fc-label { font-size: 11px; font-weight: 500; letter-spacing: .12em; opacity: .75; }
+
+.feature-card h2 { font-size: 20px; font-weight: 500; margin-top: 6px; }
+
+.fc-row { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+
+.fc-price { font-size: 20px; font-weight: 700; }
+.fc-price small { font-size: 12px; font-weight: 400; opacity: .75; }
+
+.mini-chip {
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--feature-mini-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.fc-icon {
+  margin-left: auto;
+  font-size: 56px;
+  opacity: .3;
+  flex: none;
+}
+
+/* ---------- plan cards ---------- */
+
+.plan { margin-bottom: 12px; }
+
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.plan h3 { font-size: 16px; font-weight: 500; }
+
+.key-preview {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--on-surface-var);
+  letter-spacing: .03em;
+}
+
+.key-preview b { color: var(--primary); font-weight: 500; }
+
+.plan .meta { margin-top: 4px; font-size: 12px; color: var(--on-surface-var); }
+
+.price-md { font-size: 22px; font-weight: 500; }
+.price-md small { font-size: 12px; font-weight: 400; color: var(--on-surface-var); }
+.price-md s { font-size: 12px; color: var(--on-surface-var); margin-left: 6px; }
+
+.plan .end { margin-top: 14px; align-items: flex-end; }
+
+/* ---------- navbar (bottom) ---------- */
+
+.navbar-m3 {
+  height: 80px;
+  flex: none;
+  background: var(--sc);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 0 8px;
+}
+
+.nav-item {
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--on-surface-var);
+  font-family: var(--roboto);
+}
+
+.nav-ind {
+  width: 64px;
+  height: 32px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  transition: background .2s ease-out;
+}
+
+.nav-item.on { color: var(--on-surface); }
+.nav-item.on .nav-ind { background: var(--secondary-container); color: var(--on-secondary-container); }
+.nav-item:not(.on):hover .nav-ind { background: var(--state-layer); }
+
+.nav-item span.lb { font-size: 12px; font-weight: 500; letter-spacing: .02em; }
+
+/* ---------- detail screen ---------- */
+
+.key-card {
+  border-radius: 16px;
+  background: var(--sc-high);
+  padding: 16px;
+  margin-top: 8px;
+  flex: none;
+}
+
+.kc-head { display: flex; align-items: center; justify-content: space-between; }
+
+.kc-label { font-size: 11px; font-weight: 500; letter-spacing: .12em; color: var(--primary); }
+
+.key-card code {
+  display: block;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: .03em;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.key-card code b { color: var(--primary); font-weight: 500; }
+.key-card code .mask { color: var(--outline); }
+
+.detail-title { display: flex; align-items: center; gap: 10px; padding: 20px 4px 12px; }
+
+.detail-title h1 { font-size: 22px; font-weight: 400; }
+
+.detail-title .ver-tag { font-size: 12px; color: var(--tertiary); font-weight: 500; letter-spacing: .04em; }
+
+.seg {
+  display: flex;
+  height: 40px;
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  overflow: hidden;
+  flex: none;
+  margin-bottom: 16px;
+}
+
+.seg button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--on-surface);
+  font-family: var(--roboto);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.seg button + button { border-left: 1px solid var(--outline); }
+.seg button.on { background: var(--secondary-container); color: var(--on-secondary-container); }
+
+.attr-list { padding: 4px 0; }
+
+.attr-row { display: flex; align-items: center; gap: 16px; padding: 11px 4px; }
+
+.attr-row .msr { color: var(--on-surface-var); font-size: 22px; }
+
+.attr-row .lb { font-size: 14px; color: var(--on-surface-var); }
+
+.attr-row .val { margin-left: auto; font-size: 14px; font-weight: 500; }
+.attr-row .val.ok { color: var(--tertiary); display: flex; align-items: center; gap: 4px; }
+.attr-row .val.ok .msr { font-size: 18px; color: var(--tertiary); }
+
+.buy-row { margin-top: auto; padding: 16px 4px; flex: none; }
+
+.off-note { font-size: 12px; font-weight: 500; color: var(--error); letter-spacing: .04em; margin-bottom: 6px; }
+
+.dock {
+  flex: none;
+  background: var(--sc);
+  border-top: 1px solid var(--outline-var);
+  padding: 14px 16px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fine { font-size: 12px; color: var(--on-surface-var); text-align: center; }
+
+/* ---------- checkout screen ---------- */
+
+.order-card .oc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.order-card .oc-head h3 { font-size: 16px; font-weight: 500; }
+.order-card .oc-head span { font-family: var(--mono); font-size: 12px; color: var(--on-surface-var); }
+
+.oc-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  font-size: 14px;
+  color: var(--on-surface-var);
+}
+
+.oc-row b { color: var(--on-surface); font-weight: 400; }
+
+.oc-divider { height: 1px; background: var(--outline-var); margin: 6px 0; }
+
+.oc-total { display: flex; justify-content: space-between; padding-top: 8px; font-size: 16px; font-weight: 500; }
+.oc-total b { color: var(--primary); }
+
+.group-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  color: var(--on-surface-var);
+  padding: 18px 4px 10px;
+}
+
+.pay-card { padding: 4px 0; }
+
+.pay-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 12px;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background .15s ease-out;
+}
+
+.pay-row:hover { background: var(--state-layer-row); }
+
+.radio {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--outline);
+  display: grid;
+  place-items: center;
+  transition: border-color .15s ease-out;
+}
+
+.radio::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+  transform: scale(0);
+  transition: transform .15s ease-out;
+}
+
+.pay-row.on .radio { border-color: var(--primary); }
+.pay-row.on .radio::after { transform: scale(1); }
+
+.pay-row .msr { color: var(--on-surface-var); font-size: 22px; }
+.pay-row .nm { font-size: 14px; }
+.pay-row em {
+  font-style: normal;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  color: var(--on-surface-var);
+  background: var(--sc-high);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.promo-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+
+.tf {
+  flex: 1;
+  height: 52px;
+  border: 1px solid var(--outline);
+  border-radius: 8px 8px 4px 4px;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  padding: 6px 14px 10px;
+}
+
+.tf label {
+  position: absolute;
+  top: -7px;
+  left: 10px;
+  background: var(--surface);
+  padding: 0 5px;
+  font-size: 11px;
+  color: var(--on-surface-var);
+}
+
+.tf input {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--on-surface);
+}
+
+.snack {
+  margin-top: 16px;
+  background: var(--inverse-surface);
+  color: var(--inverse-on-surface);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.snack .msr { font-size: 18px; flex: none; }
+
+.checkout-total { margin-top: auto; display: flex; align-items: baseline; justify-content: space-between; padding: 18px 4px 12px; flex: none; }
+
+.checkout-total span { font-size: 13px; color: var(--on-surface-var); }
+.checkout-total strong { font-size: 28px; font-weight: 400; }
+
+/* ---------- my keys screen ---------- */
+
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; flex: none; }
+
+.stat-mini {
+  border: 1px solid var(--outline-var);
+  border-radius: 12px;
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.stat-mini strong { display: block; font-size: 18px; font-weight: 500; }
+.stat-mini span { display: block; margin-top: 3px; font-size: 10.5px; color: var(--on-surface-var); letter-spacing: .03em; }
+
+.key-list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; overflow: hidden; padding-bottom: 76px; }
+
+.keycard .kc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.keycard h3 { font-size: 16px; font-weight: 500; }
+
+.status-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .05em;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.status-chip.active { background: var(--primary-container); color: var(--on-primary-container); }
+.status-chip.low { background: var(--tertiary-container); color: var(--on-tertiary-container); }
+.status-chip.dead { background: var(--error-container); color: var(--on-error-container); }
+
+.usage { margin-top: 12px; }
+
+.prog { height: 6px; border-radius: 999px; background: var(--sc-highest); position: relative; }
+
+.prog i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.prog.tert i { background: var(--tertiary); }
+.prog.err i { background: var(--error); }
+
+.u-num {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--on-surface-var);
+}
+
+.u-num b { color: var(--on-surface); font-weight: 500; }
+
+.keycard footer { margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+
+.keycard footer .date { font-size: 12px; color: var(--on-surface-var); }
+
+.keycard.expired { opacity: .55; }
+
+.fab-ext {
+  position: absolute;
+  right: 16px;
+  bottom: 96px;
+  height: 56px;
+  border: none;
+  border-radius: 16px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  box-shadow: var(--elev3);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  font-family: var(--roboto);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 20;
+  transition: box-shadow .2s ease-out, transform .2s ease-out;
+}
+
+.fab-ext:hover { box-shadow: 0 2px 3px rgba(0,0,0,.3), 0 6px 10px 4px rgba(0,0,0,.15); transform: translateY(-2px); }
+
+/* ---------- profile screen ---------- */
+
+.profile-head { display: flex; align-items: center; gap: 16px; padding: 12px 4px 20px; }
+
+.avatar-lg {
+  width: 68px;
+  height: 68px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.profile-head h2 { font-size: 20px; font-weight: 500; }
+.profile-head p { margin-top: 4px; font-size: 12.5px; color: var(--on-surface-var); letter-spacing: .04em; }
+
+.balance-card {
+  border-radius: 16px;
+  background: var(--sc-low);
+  box-shadow: var(--elev1);
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+}
+
+.balance-card .lb { font-size: 11px; font-weight: 500; letter-spacing: .12em; color: var(--on-surface-var); }
+
+.balance-card .amt { margin-top: 8px; font-size: 34px; font-weight: 400; color: var(--primary); }
+
+.settings-card { margin-top: 16px; padding: 4px 0; }
+
+.list-row { display: flex; align-items: center; gap: 16px; padding: 14px 14px; cursor: pointer; border-radius: 12px; transition: background .15s ease-out; }
+
+.list-row:hover { background: var(--state-layer-row); }
+
+.list-row .msr { color: var(--on-surface-var); font-size: 22px; flex: none; }
+.list-row .t { font-size: 14px; }
+.list-row .chev { margin-left: auto; color: var(--on-surface-var); font-size: 22px; }
+.list-row.err .msr, .list-row.err .t, .list-row.err .chev { color: var(--error); }
+
+.switch {
+  margin-left: auto;
+  width: 52px;
+  height: 32px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--sc-highest);
+  border: 2px solid var(--outline);
+  position: relative;
+  cursor: pointer;
+  transition: background .2s ease-out, border-color .2s ease-out;
+}
+
+.switch i {
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  translate: 0 -50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--outline);
+  transition: left .2s ease-out, width .2s ease-out, height .2s ease-out, background .2s ease-out;
+}
+
+.switch.on { background: var(--primary); border-color: var(--primary); }
+.switch.on i { left: 23px; width: 24px; height: 24px; background: var(--on-primary); }
+
+.ver {
+  margin: auto 0 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--on-surface-var);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ver i { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+
+/* ---------- motion safety ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="board-head">
+  <div class="board-title">
+    <h1>KEYFORGE<em>_MARKET</em></h1>
+    <p>API KEY 售卖 APP · MATERIAL 3 风格 · ONE HTML CANVAS / 5 SCREENS</p>
+  </div>
+  <div class="board-actions">
+    <button class="theme-toggle ripple" id="themeToggle" aria-label="切换亮暗色主题" title="切换主题">
+      <span class="msr icon-sun">light_mode</span>
+      <span class="msr icon-moon">dark_mode</span>
+    </button>
+    <div class="board-tags">
+      <span class="tag">#MATERIAL_3</span>
+      <span class="tag">#ROBOTO</span>
+      <span class="tag alt">#TONAL_PALETTE</span>
+      <span class="tag">#STATE_LAYERS</span>
+      <span class="tag alt">#RIPPLE</span>
+    </div>
+  </div>
+</header>
+
+<main class="canvas">
+
+  <!-- ============ SCREEN 01 : STORE ============ -->
+  <section class="screen-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="msr">signal_cellular_alt</span><span class="msr">wifi</span><span class="msr">battery_full</span></span>
+        </div>
+        <div class="appbar">
+          <span class="appbar-title">KeyForge</span>
+          <div class="spacer"></div>
+          <button class="ibtn ripple"><span class="msr">notifications</span><i class="dot-badge"></i></button>
+          <div class="avatar-sm">R</div>
+        </div>
+        <div class="content">
+          <div class="search">
+            <span class="msr">search</span>
+            <span>搜索套餐、模型…</span>
+            <div class="spacer"></div>
+            <button class="ibtn"><span class="msr">tune</span></button>
+          </div>
+          <div class="headline-block">
+            <h1>购买 API 密钥</h1>
+            <p>价格透明 · 即时到账</p>
+          </div>
+          <div class="chips-row">
+            <button class="chip-m3 selected"><span class="msr chk">check</span>全部</button>
+            <button class="chip-m3"><span class="msr chk">check</span>LLM</button>
+            <button class="chip-m3"><span class="msr chk">check</span>视觉</button>
+            <button class="chip-m3"><span class="msr chk">check</span>语音</button>
+            <button class="chip-m3"><span class="msr chk">check</span>向量</button>
+          </div>
+          <div class="feature-card">
+            <div>
+              <span class="fc-label">精选套餐</span>
+              <h2>GPT-4o 专业版</h2>
+              <div class="fc-row">
+                <span class="fc-price">$49<small>/月</small></span>
+                <span class="mini-chip">−29%</span>
+              </div>
+            </div>
+            <span class="msr fill fc-icon">workspace_premium</span>
+          </div>
+          <article class="card-outlined plan">
+            <div class="row-between"><h3>Claude Sonnet 套餐</h3><span class="assist-chip new">新品</span></div>
+            <p class="key-preview">sk-live-<b>••••••••</b>a07d</p>
+            <p class="meta">500万 Token/月 · 300 次/分 · p99 380ms</p>
+            <div class="row-between end">
+              <div class="price-md">$29.00<small>/月</small></div>
+              <button class="btn-filled ripple">购买</button>
+            </div>
+          </article>
+          <article class="card-outlined plan">
+            <div class="row-between"><h3>向量模型大容量包</h3><span class="assist-chip sale">−40%</span></div>
+            <p class="key-preview">sk-live-<b>••••••••</b>c2b9</p>
+            <p class="meta">5000万 Token/月 · 2000 次/分</p>
+            <div class="row-between end">
+              <div class="price-md">$9.00<small>/月 <s>$15</s></small></div>
+              <button class="btn-filled ripple">购买</button>
+            </div>
+          </article>
+        </div>
+        <nav class="navbar-m3">
+          <button class="nav-item on"><span class="nav-ind"><span class="msr fill">storefront</span></span><span class="lb">商店</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">vpn_key</span></span><span class="lb">密钥</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">menu_book</span></span><span class="lb">文档</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">person</span></span><span class="lb">我的</span></button>
+        </nav>
+      </div>
+    </div>
+    <figcaption class="screen-label"><b>01 / STORE</b> — 市场首页</figcaption>
+  </section>
+
+  <!-- ============ SCREEN 02 : DETAIL ============ -->
+  <section class="screen-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="msr">signal_cellular_alt</span><span class="msr">wifi</span><span class="msr">battery_full</span></span>
+        </div>
+        <div class="appbar">
+          <button class="ibtn ripple"><span class="msr">arrow_back</span></button>
+          <span class="appbar-title">套餐详情</span>
+          <div class="spacer"></div>
+          <button class="ibtn accent ripple"><span class="msr">favorite</span></button>
+        </div>
+        <div class="content">
+          <div class="key-card">
+            <div class="kc-head">
+              <span class="kc-label">密钥预览</span>
+              <button class="ibtn"><span class="msr">content_copy</span></button>
+            </div>
+            <code><b>sk-live-</b><span class="mask">••••••••••••</span>4F2A</code>
+          </div>
+          <div class="detail-title">
+            <h1>专业通行证</h1>
+            <span class="ver-tag">v3 · 不限量*</span>
+          </div>
+          <div class="seg">
+            <button class="on">按月付费</button>
+            <button>按年 −20%</button>
+          </div>
+          <div class="card-outlined attr-list">
+            <div class="attr-row"><span class="msr">bolt</span><span class="lb">Token 用量</span><span class="val">1000万 / 月</span></div>
+            <div class="attr-row"><span class="msr">speed</span><span class="lb">频率限制</span><span class="val">600 次/分钟</span></div>
+            <div class="attr-row"><span class="msr">schedule</span><span class="lb">延迟</span><span class="val">p99 &lt; 420ms</span></div>
+            <div class="attr-row"><span class="msr">verified</span><span class="lb">可用性</span><span class="val ok">99.99%<span class="msr">check_circle</span></span></div>
+            <div class="attr-row"><span class="msr">autorenew</span><span class="lb">自动续费</span><span class="val">已开启</span></div>
+          </div>
+          <div class="buy-row">
+            <p class="off-note">上线特惠 −29% · 48 小时后结束</p>
+            <div class="row-between">
+              <div class="price-md">$49.00<small>/月 <s>$69</s></small></div>
+              <button class="btn-outlined ripple">收藏</button>
+            </div>
+          </div>
+        </div>
+        <div class="dock">
+          <button class="btn-filled btn-block ripple">立即购买 · $49.00/月</button>
+          <p class="fine">30 秒内发货 · 7 天无理由退款</p>
+        </div>
+      </div>
+    </div>
+    <figcaption class="screen-label"><b>02 / DETAIL</b> — 商品详情</figcaption>
+  </section>
+
+  <!-- ============ SCREEN 03 : CHECKOUT ============ -->
+  <section class="screen-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="msr">signal_cellular_alt</span><span class="msr">wifi</span><span class="msr">battery_full</span></span>
+        </div>
+        <div class="appbar">
+          <button class="ibtn ripple"><span class="msr">arrow_back</span></button>
+          <span class="appbar-title">结算</span>
+          <div class="spacer"></div>
+        </div>
+        <div class="content">
+          <div class="card-outlined order-card" style="margin-top:8px">
+            <div class="oc-head"><h3>订单</h3><span>#KF-88214</span></div>
+            <div class="oc-row"><span>专业通行证 × 1</span><b>$49.00</b></div>
+            <div class="oc-row"><span>签发费</span><b>免费</b></div>
+            <div class="oc-row"><span>网络费</span><b>$0.49</b></div>
+            <div class="oc-divider"></div>
+            <div class="oc-total"><span>合计</span><b>$49.49</b></div>
+          </div>
+          <p class="group-label">支付方式</p>
+          <div class="card-outlined pay-card" data-radio-group>
+            <div class="pay-row on">
+              <span class="radio"></span>
+              <span class="msr">currency_bitcoin</span>
+              <span class="nm">USDT · TRC-20</span>
+              <em>即时到账</em>
+            </div>
+            <div class="pay-row">
+              <span class="radio"></span>
+              <span class="msr">diamond</span>
+              <span class="nm">ETH · Base</span>
+              <em>手续费 ≈ $0.8</em>
+            </div>
+            <div class="pay-row">
+              <span class="radio"></span>
+              <span class="msr">credit_card</span>
+              <span class="nm">VISA •••• 4242</span>
+              <em>3-D 验证</em>
+            </div>
+          </div>
+          <div class="promo-row">
+            <div class="tf">
+              <label>优惠码</label>
+              <input value="KEYFORGE10" readonly>
+            </div>
+            <button class="btn-text ripple">使用</button>
+          </div>
+          <div class="snack">
+            <span class="msr">bolt</span>
+            付款成功后，密钥将立即生成。
+          </div>
+          <div class="checkout-total">
+            <span>应付金额</span>
+            <strong>$49.49</strong>
+          </div>
+        </div>
+        <div class="dock">
+          <button class="btn-filled btn-block ripple">确认支付</button>
+          <p class="fine">无订阅陷阱 · 随时可取消</p>
+        </div>
+      </div>
+    </div>
+    <figcaption class="screen-label"><b>03 / CHECKOUT</b> — 结账支付</figcaption>
+  </section>
+
+  <!-- ============ SCREEN 04 : MY KEYS ============ -->
+  <section class="screen-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="msr">signal_cellular_alt</span><span class="msr">wifi</span><span class="msr">battery_full</span></span>
+        </div>
+        <div class="appbar">
+          <span class="appbar-title">我的密钥</span>
+          <div class="spacer"></div>
+          <button class="ibtn ripple"><span class="msr">notifications</span><i class="dot-badge"></i></button>
+        </div>
+        <div class="content">
+          <div class="stats-grid">
+            <div class="stat-mini"><strong>07</strong><span>生效中</span></div>
+            <div class="stat-mini"><strong>$78</strong><span>本月消费</span></div>
+            <div class="stat-mini"><strong>08-02</strong><span>下次续期</span></div>
+          </div>
+          <div class="key-list">
+            <article class="card-outlined keycard">
+              <div class="kc-top"><h3>专业通行证</h3><span class="status-chip active">生效中</span></div>
+              <p class="key-preview">sk-live-<b>••••••••</b>7c31</p>
+              <div class="usage">
+                <div class="prog"><i style="width:72%"></i></div>
+                <div class="u-num"><span>已用</span><b>720万 / 1000万 Token</b></div>
+              </div>
+              <footer>
+                <span class="date">08-24 续期</span>
+                <button class="btn-text ripple">管理</button>
+              </footer>
+            </article>
+            <article class="card-outlined keycard">
+              <div class="kc-top"><h3>视觉模型包</h3><span class="status-chip low">额度告急</span></div>
+              <p class="key-preview">sk-live-<b>••••••••</b>f5e0</p>
+              <div class="usage">
+                <div class="prog tert"><i style="width:89%"></i></div>
+                <div class="u-num"><span>已用</span><b>445万 / 500万 Token</b></div>
+              </div>
+              <footer>
+                <span class="date">08-02 续期</span>
+                <button class="btn-text ripple">充值</button>
+              </footer>
+            </article>
+            <article class="card-outlined keycard expired">
+              <div class="kc-top"><h3>语音入门包</h3><span class="status-chip dead">已过期</span></div>
+              <p class="key-preview">sk-live-<b>••••••••</b>b8aa</p>
+              <div class="usage">
+                <div class="prog err"><i style="width:100%"></i></div>
+                <div class="u-num"><span>已用</span><b>100万 / 100万 Token</b></div>
+              </div>
+              <footer>
+                <span class="date">07-18 已过期</span>
+                <button class="btn-text ripple">重新购买</button>
+              </footer>
+            </article>
+          </div>
+        </div>
+        <button class="fab-ext ripple"><span class="msr">add</span>新建密钥</button>
+        <nav class="navbar-m3">
+          <button class="nav-item"><span class="nav-ind"><span class="msr">storefront</span></span><span class="lb">商店</span></button>
+          <button class="nav-item on"><span class="nav-ind"><span class="msr fill">vpn_key</span></span><span class="lb">密钥</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">menu_book</span></span><span class="lb">文档</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">person</span></span><span class="lb">我的</span></button>
+        </nav>
+      </div>
+    </div>
+    <figcaption class="screen-label"><b>04 / MY KEYS</b> — 我的密钥</figcaption>
+  </section>
+
+  <!-- ============ SCREEN 05 : PROFILE ============ -->
+  <section class="screen-wrap">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="msr">signal_cellular_alt</span><span class="msr">wifi</span><span class="msr">battery_full</span></span>
+        </div>
+        <div class="appbar">
+          <span class="appbar-title">个人中心</span>
+          <div class="spacer"></div>
+          <button class="ibtn ripple"><span class="msr">edit</span></button>
+        </div>
+        <div class="content">
+          <div class="profile-head">
+            <div class="avatar-lg">R</div>
+            <div>
+              <h2>root@keyforge</h2>
+              <p>2024 年注册 · 元老等级</p>
+            </div>
+          </div>
+          <div class="balance-card">
+            <div>
+              <span class="lb">账户余额</span>
+              <div class="amt">$128.40</div>
+            </div>
+            <button class="btn-filled ripple">充值</button>
+          </div>
+          <div class="stats-grid" style="margin-top:12px">
+            <div class="stat-mini"><strong>07</strong><span>持有密钥</span></div>
+            <div class="stat-mini"><strong>$342</strong><span>累计消费</span></div>
+            <div class="stat-mini"><strong>42天</strong><span>连续使用</span></div>
+          </div>
+          <div class="card-outlined settings-card">
+            <div class="list-row"><span class="msr">menu_book</span><span class="t">API 文档</span><span class="msr chev">chevron_right</span></div>
+            <div class="list-row"><span class="msr">hub</span><span class="t">Webhook 接入点</span><span class="msr chev">chevron_right</span></div>
+            <div class="list-row"><span class="msr">shield</span><span class="t">两步验证</span><span class="switch on"><i></i></span></div>
+            <div class="list-row err"><span class="msr">report</span><span class="t">紧急开关 · 吊销全部</span><span class="msr chev">chevron_right</span></div>
+            <div class="list-row err"><span class="msr">logout</span><span class="t">退出登录</span></div>
+          </div>
+          <p class="ver">KeyForge v2.4.1 <i></i> 全部系统运行正常</p>
+        </div>
+        <nav class="navbar-m3">
+          <button class="nav-item"><span class="nav-ind"><span class="msr">storefront</span></span><span class="lb">商店</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">vpn_key</span></span><span class="lb">密钥</span></button>
+          <button class="nav-item"><span class="nav-ind"><span class="msr">menu_book</span></span><span class="lb">文档</span></button>
+          <button class="nav-item on"><span class="nav-ind"><span class="msr fill">person</span></span><span class="lb">我的</span></button>
+        </nav>
+      </div>
+    </div>
+    <figcaption class="screen-label"><b>05 / PROFILE</b> — 个人中心</figcaption>
+  </section>
+
+</main>
+
+<script>
+/** -----------------------------------------------
+ *  Theme switch — dark ⇄ light
+ *  persist via localStorage; default = dark
+ *  ----------------------------------------------- */
+(function () {
+  var STORAGE_KEY = 'kf-theme';
+  var root = document.documentElement;
+  var btn = document.getElementById('themeToggle');
+  var media = window.matchMedia('(prefers-color-scheme: light)');
+
+  function apply(theme, withTransition) {
+    if (withTransition) root.classList.add('theme-transitioning');
+    root.setAttribute('data-theme', theme);
+    if (btn) btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+    try { localStorage.setItem(STORAGE_KEY, theme); } catch (_) {}
+    if (withTransition) {
+      setTimeout(function () { root.classList.remove('theme-transitioning'); }, 380);
+    }
+  }
+
+  // initial
+  var saved = null;
+  try { saved = localStorage.getItem(STORAGE_KEY); } catch (_) {}
+  apply(saved === 'light' || saved === 'dark' ? saved : 'dark', false);
+
+  // click toggle
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var current = root.getAttribute('data-theme') || 'dark';
+      apply(current === 'dark' ? 'light' : 'dark', true);
+    });
+  }
+
+  // system theme follow (only if user has not chosen explicitly)
+  function followSystem() {
+    var hasChoice = false;
+    try { hasChoice = !!localStorage.getItem(STORAGE_KEY); } catch (_) {}
+    if (!hasChoice) apply(media.matches ? 'light' : 'dark', true);
+  }
+  if (media.addEventListener) media.addEventListener('change', followSystem);
+  else if (media.addListener) media.addListener(followSystem);
+})();
+
+/** 全局平滑过渡：仅在切换瞬间启用，结束后移除，不影响日常交互性能 */
+(function () {
+  var style = document.createElement('style');
+  style.textContent =
+    '.theme-transitioning, .theme-transitioning *, .theme-transitioning *::before, .theme-transitioning *::after {' +
+    '  transition: background-color .35s cubic-bezier(.2,.7,.2,1),' +
+    '              color .35s cubic-bezier(.2,.7,.2,1),' +
+    '              border-color .35s cubic-bezier(.2,.7,.2,1),' +
+    '              box-shadow .35s cubic-bezier(.2,.7,.2,1) !important;' +
+    '}';
+  document.head.appendChild(style);
+})();
+
+/** 点击涟漪效果(Material state layer 交互反馈) */
+document.addEventListener('pointerdown', function (e) {
+  var target = e.target.closest('.ripple');
+  if (!target) return;
+
+  var rect = target.getBoundingClientRect();
+  var size = Math.max(rect.width, rect.height) * 2;
+  var wave = document.createElement('span');
+
+  wave.className = 'ripple-wave';
+  wave.style.width = wave.style.height = size + 'px';
+  wave.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  wave.style.top = (e.clientY - rect.top - size / 2) + 'px';
+
+  target.appendChild(wave);
+  setTimeout(function () { wave.remove(); }, 600);
+});
+
+/** 筛选 Chip 单选切换 */
+document.querySelectorAll('.chips-row').forEach(function (row) {
+  row.querySelectorAll('.chip-m3').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      row.querySelectorAll('.chip-m3').forEach(function (c) { c.classList.remove('selected'); });
+      chip.classList.add('selected');
+    });
+  });
+});
+
+/** 计费周期分段按钮单选 */
+document.querySelectorAll('.seg').forEach(function (seg) {
+  seg.querySelectorAll('button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
+      btn.classList.add('on');
+    });
+  });
+});
+
+/** 支付方式 Radio 组内单选 */
+document.querySelectorAll('[data-radio-group]').forEach(function (group) {
+  group.querySelectorAll('.pay-row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      group.querySelectorAll('.pay-row').forEach(function (r) { r.classList.remove('on'); });
+      row.classList.add('on');
+    });
+  });
+});
+
+/** 开关切换 */
+document.querySelectorAll('.switch').forEach(function (sw) {
+  sw.addEventListener('click', function () { sw.classList.toggle('on'); });
+});
+</script>
+
+</body>
+</html>

@@ -154,8 +154,8 @@ export default function EditorPage() {
         </div>
       </div>
 
-      {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Main content area (2026-08-31: 加 relative 让 CodeReviewPanel overlay 模式可绝对定位) */}
+      <div className="relative flex flex-1 overflow-hidden">
         {/* Chat area */}
         <div className="flex flex-1 flex-col min-w-0">
           {/* Messages */}
@@ -228,10 +228,12 @@ export default function EditorPage() {
           />
         </div>
 
-        {/* Collapsible Right panel - Code Review */}
+        {/* Collapsible Right panel - Code Review (2026-08-31: 独立 /editor 页用 overlay 模式,
+            需父级 relative 让 absolute 生效) */}
         <CodeReviewPanel
           changes={changes}
           collapsed={reviewCollapsed}
+          mode="overlay"
           onAcceptChange={handleAccept}
           onRejectChange={handleReject}
           onToggleCollapse={() => setReviewCollapsed((v) => !v)}

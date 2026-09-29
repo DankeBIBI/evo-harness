@@ -17,6 +17,8 @@ export interface ToolResult {
    *  - 'meta' / 'plan' 类按阈值压缩
    */
   category?: ToolCategory;
+  /** 类目未知标记(resolveToolCategory 查不到 registry 时兜底 'file' 并置位,供压缩统计可见) */
+  unknownCategory?: boolean;
   error?: string;
   id: string;
   output: string;
@@ -30,7 +32,8 @@ export interface ToolCall {
 }
 
 // JSON Schema 简化版(仅 type/required/properties/description,够 LLM 拼参数用)
-export interface ParamSchema {
+// 用 type 而非 interface:对象类型别名带隐式索引签名,可直接赋给 Record<string, unknown>(ToolSchema.parameters),无需断言
+export type ParamSchema = {
   type: 'array' | 'boolean' | 'number' | 'object' | 'string';
   description?: string;
   enum?: string[];
@@ -51,6 +54,8 @@ export type ToolCategory = 'file' | 'interactive' | 'meta' | 'plan';
 export interface Tool {
   /** 工具分类(list_tools 过滤用) */
   category: ToolCategory;
+  /** 高危操作(如 DeleteFile):即使 auto 全局档也强制走用户确认握手 */
+  danger?: boolean;
   description: string;
   /**
    * 执行入口
@@ -62,6 +67,8 @@ export interface Tool {
     params: Record<string, unknown>,
     call?: ToolCall,
   ) => Promise<string>;
+  /** 是否修改持久化状态(写/删文件、改任务清单等);plan 档默认禁止 */
+  mutating?: boolean;
   name: string;
   /**
    * 工具参数的 JSON Schema(简化版)
@@ -69,6 +76,8 @@ export interface Tool {
    * - 用于 get_tool_def 返回给 LLM 做精确参数拼装
    */
   params: ParamSchema;
+  /** 计划(plan)档位下仍允许执行(如 SubmitPlan/Todo*:计划阶段本身需要的辅助写操作) */
+  planAllowed?: boolean;
 }
 
 // AI 模型配置（用于工具过滤）

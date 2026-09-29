@@ -1,44 +1,42 @@
 /**
- * 模型推理深度滑块 (ReasoningLevelSlider) — v6
+ * 模型推理深度滑块 (ReasoningLevelSlider) — v7.4
  *
- * 4 档胶囊滑块: low / medium / high / max
- *  - 共享 thumb (绝对定位圆角块) 在 4 档间平滑滑动 (transform translateX + 320ms ease-out)
- *  - 未选中档: 显示圆点 (•), 低饱和琥珀色 (40% 透明度)
- *  - 选中档: 显示完整字母 + 白色 (thumb 覆盖在底层按钮上)
- *  - MAX 档激活时, 胶囊底座内出现 10 粒方块粒子
- *    从 MAX 按钮范围内 (72-99% 随机) 水平向左飘出
- *  - prefers-reduced-motion: reduce 时禁用粒子 + thumb 动画
+ * 4 档分段控件: LOW / MED / HIGH / MAX
+ *  - 四档标签常显(10px 加宽字距),未选中档不再是无语义圆点
+ *  - 共享 thumb 绝对定位,320ms cubic-bezier 平滑滑动;选中档白字压在 thumb 上
+ *  - MAX 分阶段入场:切换后先等 300ms 让 thumb 滑到位,
+ *    然后 machOn=true 才渐渐启用专属动画 ——
+ *      1. 深邃方格底层 450ms 淡入(紫黑 + 6px 方格纹理)
+ *      2. thumb 渐变到紫 + 微光晕(box-shadow 450ms 过渡)
+ *      3. 底内 32×4 小方格随机相位呼吸明灭(v7.5 由行进波改为随机散布)
+ *    切离 MAX 立即复位浅色底(machOn=false)
+ *    (v7.4 移除马赫粒子拖尾,波浪背景即全部动效)
+ *  - prefers-reduced-motion: reduce 时禁用方格呼吸与滑动动画
  *
- * 持久化: useSettingsStore.reasoningLevel (localStorage v6)
+ * 持久化: useSettingsStore.reasoningLevel (localStorage)
  * 后端 binding: chat_service.go 把 reasoningLevel 透传 chatReq.Extra["reasoning_effort"]
  */
 
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/Button";
+import { useEffect, useState } from "react";
 
 const LEVELS = [
-	{ key: "low", bgClass: "", label: "Low", tooltip: "省 token · 快速回答" },
-	{
-		key: "medium",
-		bgClass: "",
-		label: "Medium",
-		tooltip: "默认档 · 平衡",
-	},
-	{
-		key: "high",
-		bgClass: "",
-		label: "High",
-		tooltip: "复杂任务 · 深度推理",
-	},
+	{ key: "low", label: "LOW", tooltip: "省 token · 快速回答" },
+	{ key: "medium", label: "MED", tooltip: "默认档 · 平衡" },
+	{ key: "high", label: "HIGH", tooltip: "复杂任务 · 深度推理" },
 	{
 		key: "max",
-		bgClass: "bg-purple-700",
 		label: "MAX",
 		tooltip: "最高推理深度 · 启用 thinking 预算",
 	},
 ] as const;
 
 type Level = (typeof LEVELS)[number]["key"];
+
+/** 深邃底方格阵列:32 列 × 4 行,方块随机散布明灭 */
+const MACH_COLS = 32;
+const MACH_ROWS = 4;
 
 export function ReasoningLevelSlider() {
 	const level = useSettingsStore((s) => s.reasoningLevel);
@@ -47,112 +45,144 @@ export function ReasoningLevelSlider() {
 	const isMax = level === "max";
 	const activeIndex = LEVELS.findIndex((l) => l.key === level);
 
+	// 分阶段入场:切到 MAX 先等 300ms(让 thumb 滑到位),再渐渐启用 MAX 专属动画
+	const [machOn, setMachOn] = useState(false);
+	useEffect(() => {
+		if (!isMax) {
+			setMachOn(false);
+
+			return;
+		}
+		const timer = setTimeout(() => setMachOn(true), 300);
+
+		return () => clearTimeout(timer);
+	}, [isMax]);
+
 	return (
 		<div className="relative inline-flex items-center self-center">
-			{/* 胶囊主体: 4 等宽 button 提供布局 + a11y + 点击; thumb 绝对定位覆盖在上面 */}
 			<div
 				aria-label="模型推理深度"
-				className="relative inline-flex h-7 items-center rounded-full border border-border/60 bg-muted/40 p-0.5"
+				className={`relative inline-flex h-7 items-center rounded-full border p-0.5 transition-colors duration-300 ${
+					machOn ? "border-violet-800/60" : "border-border/60 bg-muted"
+				}`}
 				role="radiogroup">
-				{/* 共享 thumb — 跟随 level 平滑滑动 */}
+				{/* MAX 深邃方格底层 — 延迟 300ms 后淡入;内部小方格按列错峰呼吸,自右向左波浪起伏 */}
+				{machOn && (
+					<span
+						aria-hidden
+						className="mach-bg absolute inset-0 z-0 overflow-hidden rounded-full duration-500">
+						{Array.from({ length: MACH_COLS * MACH_ROWS }).map((_, i) => {
+							const col = i % MACH_COLS;
+							const row = Math.floor(i / MACH_COLS);
+							// 随机相位:亮起的方块在区域内随机散布明灭,不成行进波;
+							// 时长逐格微差使相位永久错开,不会重新对齐
+							const phase =
+								(col * 137 + row * 61 + ((col * row) % 23) * 17) % 1900;
+							const dur = 1700 + ((col * 11 + row * 19) % 5) * 110;
+							const peak = 0.34 + (((col * 7 + row * 23) % 6) * 0.04);
+
+							return (
+								<span
+									className="mach-cell"
+									key={i}
+									style={
+										{
+											animationDelay: `${phase}ms`,
+											animationDuration: `${dur}ms`,
+											height: `${100 / MACH_ROWS}%`,
+											left: `${(col * 100) / MACH_COLS}%`,
+											top: `${(row * 100) / MACH_ROWS}%`,
+											width: `${100 / MACH_COLS}%`,
+											"--pk": `${peak}`,
+										} as React.CSSProperties
+									}
+								/>
+							);
+						})}
+					</span>
+				)}
+
+				{/* 共享 thumb — 跟随 level 平滑滑动;MAX 专属渐变+微光延迟到 machOn 后生效 */}
 				<span
 					aria-hidden
-					className="pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 z-0 rounded-full bg-amber-500 shadow-sm"
+					className={
+						machOn
+							? "pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 z-0 rounded-full shadow-[0_0_10px_rgba(124,58,237,0.35)]"
+							: "bg-primary pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 z-0 rounded-full shadow-sm"
+					}
 					style={{
 						width: `calc((100% - 4px) / ${LEVELS.length})`,
 						transform: `translateX(${activeIndex * 100}%)`,
 						transition:
-							"transform 320ms cubic-bezier(0.4, 0, 0.2, 1), width 320ms cubic-bezier(0.4, 0, 0.2, 1)",
+							"transform 320ms cubic-bezier(0.4, 0, 0.2, 1), background-color 320ms ease-out, box-shadow 450ms ease-out",
+						...(machOn
+							? {
+									background:
+										"linear-gradient(90deg, hsl(var(--primary)) 0%, #7c3aed 100%)",
+								}
+							: {}),
 					}}
 				/>
 
 				{LEVELS.map((lvl) => {
 					const isActive = level === lvl.key;
+
 					return (
 						<Button
 							aria-checked={isActive}
 							aria-label={lvl.tooltip}
 							className={[
-								"relative z-10 flex h-6 flex-1 items-center justify-center rounded-full bg-transparent",
-								"min-w-[50px] px-3 text-xs font-semibold",
-								"transition-colors duration-300",
+								"relative z-10 flex h-6 min-w-[46px] flex-1 items-center justify-center rounded-full bg-transparent px-2.5",
+								"text-[10px] font-bold tracking-widest uppercase transition-colors duration-300",
 								isActive
-									? "text-white z-30"
-									: "text-amber-500/40 hover:text-amber-500/70  hover:bg-transparent",
-								isActive && lvl.bgClass,
+									? "text-primary-foreground z-30"
+									: machOn
+										? " hover:text-primary hover:bg-transparent"
+										: "text-muted-foreground/70 hover:text-foreground hover:bg-transparent",
 							].join(" ")}
 							key={lvl.key}
 							onClick={() => setLevel(lvl.key as Level)}
 							role="radio"
 							title={lvl.tooltip}
 							type="button">
-							{isActive ? lvl.label : <DotIcon />}
+							{lvl.label}
 						</Button>
 					);
 				})}
-
-				{/* MAX 档粒子层 — 10 粒方块从 MAX 按钮 (72-99% 随机) 出生, 水平向左飘出 */}
-				{isMax && (
-					<div
-						aria-hidden
-						className="reasoning-particles pointer-events-none absolute inset-y-0 left-0 right-0 z-20 overflow-hidden rounded-full">
-						{Array.from({ length: 25 }).map((_, i) => {
-							const seed = (i * 137) % 100;
-							const startLeft = 60 + (seed % 28);
-							const delay = (i * 0.18) % 1.8;
-							const duration = 1.6 + ((seed * 7) % 10) * 0.1;
-							const size = 4 + ((seed * 3) % 3);
-							const peakOpacity = 0.5 + ((seed * 11) % 30) / 100;
-							return (
-								<span
-									className="particle bg-purple-600"
-									key={i}
-									style={{
-										animationDelay: `${delay}s`,
-										animationDuration: `${duration}s`,
-										bottom: `${7 + ((seed * 5) % 8)}px`,
-										height: `${size}px`,
-										left: `${startLeft}%`,
-										opacity: peakOpacity,
-										width: `${size}px`,
-									}}
-								/>
-							);
-						})}
-					</div>
-				)}
 			</div>
 
 			<style>{`
-        @keyframes reasoningParticleDrift {
-          0%   { transform: translateX(0)        scale(0.9); opacity: 0; }
-          12%  { opacity: 0.85; }
-          90%  { opacity: 0.6; }
-          100% { transform: translateX(-130px)   scale(0.4); opacity: 0; }
+        /* MAX 深邃底:紫黑 + 6px 静态细网格垫底;挂载时 450ms 淡入 */
+        .mach-bg {
+          background-color: #16132121;
+          background-image:
+            linear-gradient(rgba(167, 139, 250, 0.07) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(167, 139, 250, 0.07) 1px, transparent 1px);
+          background-size: 6px 6px;
+          border: none;
+          animation: machBgFadeIn 450ms ease-out both;
         }
-        .reasoning-particles .particle {
+        @keyframes machBgFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        /* 背景方格:随机相位呼吸明灭,时长逐格微差保持永久错开 */
+        .mach-cell {
           position: absolute;
-          border-radius: 1.5px;
-          background: linear-gradient(135deg, #f4e9c8 0%, #b8923a 100%);
-          box-shadow: 0 0 2px rgba(184, 146, 58, 0.55);
-          animation: reasoningParticleDrift 2.0s linear infinite;
-          animation-fill-mode: both;
+          aspect-ratio: 1 / 1;
+          background: rgba(167, 139, 250);
+          opacity: 0.22;
+          animation: cellWave 1000ms ease-in-out infinite;
+        }
+        @keyframes cellWave {
+          0%, 100% { opacity: 0; }
+          40%      { opacity: var(--pk, 0.5); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .reasoning-particles { display: none; }
-          .relative.z-10, .relative.z-0 { transition: none !important; }
+          .mach-cell { animation: none; }
+          .relative.z-0 { transition: none !important; }
         }
       `}</style>
 		</div>
-	);
-}
-
-/** 未选中档位显示的小圆点 — 低饱和琥珀, 透明度 40% */
-function DotIcon() {
-	return (
-		<span
-			aria-hidden
-			className="block h-[4px] w-[4px] rounded-full bg-current"
-		/>
 	);
 }

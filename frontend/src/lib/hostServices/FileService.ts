@@ -165,13 +165,11 @@ export async function DeleteFile(path: string): Promise<void> {
 }
 
 /** 列出目录单层 */
-export async function ListFiles(
-	path: string,
-): Promise<Record<string, unknown>[]> {
+export async function ListFiles(path: string): Promise<FileInfo[]> {
 	if (await nodeMode()) {
-		return (await nodeFs.list(toRelPath(path))).map(toRecord);
+		return nodeFs.list(toRelPath(path));
 	}
-	return (await listFiles(await getRoot(), toRelPath(path))).map(toRecord);
+	return listFiles(await getRoot(), toRelPath(path));
 }
 
 /** 递归列目录 */
@@ -246,15 +244,16 @@ export async function SearchFiles(
 	path: string,
 	keyword: string,
 	maxResults = 50,
-): Promise<Record<string, unknown>[]> {
+): Promise<FileInfo[]> {
 	if (await nodeMode()) {
 		// nodeFs.search 递归搜整个根目录(无 path 参数),结果更广
-		return (await nodeFs.search(keyword, maxResults)).map(toRecord);
+		return nodeFs.search(keyword, maxResults);
 	}
-	return (
-		await searchFiles(await getRoot(), toRelPath(path), keyword, maxResults)
-	).map(toRecord);
+	return searchFiles(await getRoot(), toRelPath(path), keyword, maxResults);
 }
+
+/** 单文件内容搜索的大小上限(与 fs/file-ops 浏览器端 grepFiles 的 5MB 约束一致) */
+const MAX_GREP_FILE_BYTES = 5 * 1024 * 1024;
 
 /** 按正则搜文件内容(返回 {file, line, content} 兼容格式) */
 export async function GrepFiles(
@@ -277,6 +276,8 @@ export async function GrepFiles(
 		const allFiles = await nodeListDeep(toRelPath(dirPath), 10);
 		for (const f of allFiles) {
 			if (f.isDir) continue;
+			// 大文件/二进制跳过,防止全文载入内存(node 路径此前缺此保护)
+			if (f.size > MAX_GREP_FILE_BYTES) continue;
 			if (includeGlob && !matchGlob(f.name, includeGlob)) continue;
 			try {
 				const content = await nodeFs.read(f.path);

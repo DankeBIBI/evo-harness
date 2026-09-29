@@ -43,6 +43,7 @@ export const submitPlanTool: Tool = {
   category: 'plan',
   description:
     'Submit a multi-step execution plan for user approval. After invocation, wait for the user to approve, refine, or reject, and return the approval result. Only available in plan mode.',
+  planAllowed: true,
   execute: async (params) => {
     const steps = (params.steps as Array<{
       id: string;
@@ -67,18 +68,15 @@ export const submitPlanTool: Tool = {
     // Persist to store
     usePlanStore.getState().submit(plan);
 
-    // Await user approval
-    const result = await new Promise<'approved' | 'refined' | 'rejected'>(
-      (resolve) => {
-        usePlanStore.setState({ _resolve: resolve });
-      },
-    );
+    // 等待用户审批;waitForDecision 内置 30s 超时自动 approve,
+    // 避免用户不响应时 Promise 永挂、pendingToolResults 计数不归零卡死会话链路
+    const decision = await usePlanStore.getState().waitForDecision();
 
-    if (result === 'approved') {
+    if (decision.action === 'approved') {
       return 'OK: plan approved, please continue execution.';
     }
-    if (result === 'refined') {
-      const feedback = usePlanStore.getState().feedback;
+    if (decision.action === 'refined') {
+      const feedback = decision.feedback;
       return `Plan needs refinement. User feedback: ${feedback}\nPlease adjust the plan based on the feedback and resubmit.`;
     }
     return 'Plan rejected. Please ask the user for new requirements.';
@@ -122,6 +120,8 @@ export const todoWriteTool: Tool = {
   category: 'plan',
   description:
     'Replace the entire AI task list for the current session. Pass empty array to clear. Prefer fine-grained TodoAdd / TodoToggle / TodoUpdateStatus / TodoEdit / TodoSetPriority / TodoDelete / TodoClearCompleted for partial mutations.',
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const todos = params.todos as Array<{
       content: string;
@@ -195,6 +195,8 @@ export const todoAddTool: Tool = {
   category: 'plan',
   description:
     "Add a single todo to the current session's task list. Returns the new todo's id. Scoped to the active conversation only.",
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoAdd ignored.';
@@ -268,6 +270,8 @@ export const todoToggleTool: Tool = {
   category: 'plan',
   description:
     "Toggle a single todo's completed state (completed <-> pending). Use TodoUpdateStatus to set in_progress.",
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoToggle ignored.';
@@ -298,6 +302,8 @@ export const todoUpdateStatusTool: Tool = {
   category: 'plan',
   description:
     "Set a single todo's status to pending / in_progress / completed. Use this to mark a task as in-progress when starting work.",
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoUpdateStatus ignored.';
@@ -337,6 +343,8 @@ export const todoUpdateStatusTool: Tool = {
 export const todoEditTool: Tool = {
   category: 'plan',
   description: 'Edit the text of a single todo. Status / priority are not changed.',
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoEdit ignored.';
@@ -369,6 +377,8 @@ export const todoEditTool: Tool = {
 export const todoSetPriorityTool: Tool = {
   category: 'plan',
   description: 'Set the priority of a single todo (high / medium / low).',
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoSetPriority ignored.';
@@ -407,6 +417,8 @@ export const todoSetPriorityTool: Tool = {
 export const todoDeleteTool: Tool = {
   category: 'plan',
   description: 'Delete a single todo from the current session.',
+  mutating: true,
+  planAllowed: true,
   execute: async (params) => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoDelete ignored.';
@@ -439,6 +451,8 @@ export const todoClearCompletedTool: Tool = {
   category: 'plan',
   description:
     'Remove all completed todos from the current session. Other sessions and user todos are untouched.',
+  mutating: true,
+  planAllowed: true,
   execute: async () => {
     const convId = getActiveConvIdOrThrow();
     if (!convId) return 'No active conversation; TodoClearCompleted ignored.';

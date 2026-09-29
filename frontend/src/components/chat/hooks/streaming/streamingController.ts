@@ -73,6 +73,11 @@ export function useStreamingController(ctx: StreamingContext): {
       });
     }
     ctx.setStreamingId(null);
+    // S1 (2026-09-06): 同步置空 streamingIdRef,消除与 React state 的同步窗口期
+    // 修复: 旧实现只 setStreamingId(null)(异步),ref 靠 useEffect 在 re-render 后才同步,
+    //       窗口期内 processToolCalls 的 onToolCallsDetected/onToolCallUpdated 会读到旧 msgId,
+    //       在 handleStopAndSend 场景可能把新会话工具写到旧消息
+    ctx.streamingIdRef.current = null;
     ctx.setIsPaused(false);
     ctx.isPausedRef.current = false;
     ctx.isProcessingQueueRef.current = false;
@@ -81,14 +86,28 @@ export function useStreamingController(ctx: StreamingContext): {
     ctx.waitingForContinuationRef.current = false;
     ctx.sendContinuationRef.current = null;
     ctx.accumulatedResultsRef.current = [];
+    // M2 (2026-09-06): 清理原生 tool_call 累积器,避免中途停止后残留到下次发送
+    ctx.nativeToolCallsRef.current.clear();
+    // M3 (2026-09-06): 取消挂起的 raw rAF,避免停止后用陈旧内容覆盖 setStreamingRawContent('')
+    if (ctx.streamingRawRafIdRef.current !== null) {
+      cancelAnimationFrame(ctx.streamingRawRafIdRef.current);
+      ctx.streamingRawRafIdRef.current = null;
+    }
     ctx.fullContentRef.current = '';
     ctx.streamingContentRef.current = '';
     ctx.setStreamingRawContent('');
   }, [ctx, cancelStreamingRaf]);
 
   const handlePause = useCallback(() => {
-    ctx.isPausedRef.current = !ctx.isPausedRef.current;
-    ctx.setIsPaused(ctx.isPausedRef.current);
+    const nextPaused = !ctx.isPausedRef.current;
+    ctx.isPausedRef.current = nextPaused;
+    ctx.setIsPaused(nextPaused);
+    // S2 (2026-09-06): 暂停→恢复时主动重同步一次
+    // 修复: 暂停期间 chunk 仍累积到 fullContentRef,但 scheduleStreamingUpdate 被跳过;
+    //       若恢复后无新 chunk 到达(如等待工具结果),UI 停留在暂停前内容,用户误以为输出丢失
+    if (!nextPaused && ctx.fullContentRef.current) {
+      ctx.scheduleStreamingUpdate(ctx.fullContentRef.current);
+    }
   }, [ctx]);
 
   const handleStop = useCallback(() => {

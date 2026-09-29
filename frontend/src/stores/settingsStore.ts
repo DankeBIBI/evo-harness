@@ -29,8 +29,6 @@ export interface UserSettings {
   immersiveChatMode: boolean;
   /** AI 编辑器模式：启用 Cursor 风格的代码编辑界面 */
   editorMode: boolean;
-  /** 自动任务路由：未手动选 Agent 时，按消息内容自动选 orchestrator 入口 */
-  autoRoute: boolean;
   /** AI 工具权限档位:plan=只读规划 / edit=按工具默认权限(写操作需确认) / auto=全部自动通过 */
   toolMode: 'auto' | 'edit' | 'plan';
   /**
@@ -50,8 +48,11 @@ export interface UserSettings {
    * 工具结果累积 compact 总开关（默认关闭）。
    * 关闭时：sendContinuation 续传前不动 accumulatedResults，原样透传给 AI。
    * 开启时：累积结果总字符 > compactAccumulatedChars 时按 category 智能压缩：
-   *   - file 类（读文件/grep 等）永远保留完整内容（避免 AI 拿到残缺文件错过关键代码）
-   *   - 其余类走"跨结果省略"：预算内完整保留,超预算整条省略 + [结果已省略] 标记
+   *   - file 类（读文件/grep 等）保留完整内容，但有总量上限（4×阈值），
+   *     超限后最旧的 file 条目降级为 [文件结果已省略] 标记（防全 file 场景撑爆窗口）
+   *   - 未注册工具按 file 兜底豁免，并在压缩反馈中计数提示
+   *   - 其余类走"跨结果省略"：预算内完整保留，超预算整条省略 + [结果已省略] 标记；
+   *     单条 >10k 字符仅保留头部 2000 字符预览 + 截断标记（不再整条丢弃）
    * 2026-08-19 方案 A：移除单条截断——旧策略截断让 AI 拿半截内容误以为完整,
    *                 判断"信息不足"重查 → 再截断 → 死循环
    * 显式禁用是默认行为，避免误伤。
@@ -92,7 +93,6 @@ interface SettingsState extends UserSettings {
   setDialogAnimation: (animation: DialogAnimation) => void;
   setImmersiveChatMode: (enable: boolean) => void;
   setEditorMode: (enable: boolean) => void;
-  setAutoRoute: (enable: boolean) => void;
   setToolMode: (mode: 'auto' | 'edit' | 'plan') => void;
   setStreamingMaxLength: (max: number) => void;
   setMaxContinuationRounds: (rounds: number) => void;
@@ -116,7 +116,6 @@ export const useSettingsStore = create<SettingsState>()(
       dialogAnimation: 'default',
       immersiveChatMode: false,
       editorMode: false,
-      autoRoute: true,
       toolMode: 'edit',
       streamingMaxLength: 200_000,
       maxContinuationRounds: 100,
@@ -136,7 +135,6 @@ export const useSettingsStore = create<SettingsState>()(
         set({ enableTransitionAnimation: enable }),
       setDialogAnimation: (dialogAnimation) => set({ dialogAnimation }),
       setImmersiveChatMode: (immersiveChatMode) => set({ immersiveChatMode }),
-      setAutoRoute: (autoRoute) => set({ autoRoute }),
       setEditorMode: (editorMode) => set({ editorMode }),
       setToolMode: (toolMode) => set({ toolMode }),
       setStreamingMaxLength: (streamingMaxLength) => set({ streamingMaxLength }),
@@ -150,8 +148,8 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'ai-studio-settings',
-      // v7: 移除 compactResultHeadChars（方案 A 不再单条截断）
-      version: 7,
+      // v8: 移除已废弃的 autoRoute（自动任务路由功能下线）
+      version: 8,
       migrate: (state: unknown, fromVersion: number) => {
         if (!state || typeof state !== 'object') return state;
         const s = state as Record<string, unknown>;
@@ -203,6 +201,10 @@ export const useSettingsStore = create<SettingsState>()(
         if (fromVersion < 7) {
           // v6 → v7: 移除已废弃的 compactResultHeadChars(方案 A 不再单条截断)
           delete s.compactResultHeadChars;
+        }
+        if (fromVersion < 8) {
+          // v7 → v8: 移除已废弃的 autoRoute(自动任务路由功能下线)
+          delete s.autoRoute;
         }
         return s;
       },

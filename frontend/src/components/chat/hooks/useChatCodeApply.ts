@@ -13,7 +13,6 @@ export interface PendingCodeChanges {
 }
 
 export function useChatCodeApply() {
-	const [autoApplyFileChanges, setAutoApplyFileChanges] = useState(false);
 	const [pendingCodeChanges, setPendingCodeChanges] =
 		useState<PendingCodeChanges | null>(null);
 	const appliedCodeChangeKeysRef = useRef<Set<string>>(new Set());
@@ -71,16 +70,15 @@ export function useChatCodeApply() {
 	const applyCodeChanges = useCallback(
 		async (content: string, projectPath: string) => {
 			const changes = extractCodeChanges(content, projectPath);
-			if (changes.length === 0) return { appliedCount: 0, pendingChanges: [], changes: [] };
+			if (changes.length === 0) return { pendingChanges: [], changes: [] };
 
 			// 防止 Set 无限增长
 			if (appliedCodeChangeKeysRef.current.size > MAX_APPLIED_KEYS) {
 				appliedCodeChangeKeysRef.current = new Set();
 			}
 
-			const { ReadFile, WriteFile } =
+			const { ReadFile } =
 				await import("@/lib/hostServices/FileService");
-			let appliedCount = 0;
 			const pendingChanges: PendingCodeChange[] = [];
 
 			for (const change of changes) {
@@ -90,25 +88,13 @@ export function useChatCodeApply() {
 				}
 				appliedCodeChangeKeysRef.current.add(changeKey);
 
-				// 2026-07-06 P1-2: 无论 autoApply 与否, 都先读原文件拿 originalContent
-				// (用于 diff UI "丢弃" 时写回原文件) — 文件不存在时 originalContent="", 不报错
+				// 先读原文件拿 originalContent(用于 diff UI "丢弃" 时写回原文件)
+				// 文件不存在时 originalContent="", 不报错
 				let originalContent = "";
 				try {
 					originalContent = await ReadFile(change.filePath);
 				} catch {
 					originalContent = "";
-				}
-
-				if (autoApplyFileChanges) {
-					// 2026-07-06 P1-2: autoApply 也存为 pendingChange,
-					// 让 FileChangesBar 永远显示 diff, "丢弃" 可以写回 originalContent
-					pendingChanges.push({
-						filePath: change.filePath,
-						newContent: change.newContent,
-						originalContent,
-					});
-					appliedCount += 1;
-					continue;
 				}
 
 				pendingChanges.push({
@@ -125,9 +111,9 @@ export function useChatCodeApply() {
 				});
 			}
 
-			return { appliedCount, pendingChanges, changes: pendingChanges };
+			return { pendingChanges, changes: pendingChanges };
 		},
-		[autoApplyFileChanges, extractCodeChanges],
+		[extractCodeChanges],
 	);
 
 	// 确认当前文件修改
@@ -197,12 +183,7 @@ export function useChatCodeApply() {
 		return pendingCodeChanges.changes.length - pendingCodeChanges.currentIndex;
 	}, [pendingCodeChanges]);
 
-	const toggleAutoApply = useCallback(() => {
-		setAutoApplyFileChanges((prev) => !prev);
-	}, []);
-
 	return {
-		autoApplyFileChanges,
 		pendingCodeChange,
 		pendingCodeChanges,
 		applyCodeChanges,
@@ -211,7 +192,6 @@ export function useChatCodeApply() {
 		confirmAllCodeChanges,
 		cancelCodeChange,
 		getPendingChangesCount,
-		toggleAutoApply,
 		getWorkspacePath,
 		extractCodeChanges,
 		setPendingCodeChange,

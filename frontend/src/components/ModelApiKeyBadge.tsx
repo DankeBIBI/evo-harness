@@ -10,16 +10,20 @@ export interface ModelApiKeyBadgeProps {
 export function ModelApiKeyBadge({ apiKey }: ModelApiKeyBadgeProps) {
 	if (apiKey) {
 		return (
-			<Badge className="text-xs" variant="success">
-				<CheckCircle2 className="h-[12px] w-[12px]" />
+			<Badge
+				className="shrink-0 gap-1 whitespace-nowrap text-xs"
+				variant="success">
+				<CheckCircle2 className="h-[12px] w-[12px] shrink-0" />
 				API Key 已配置
 			</Badge>
 		);
 	}
 
 	return (
-		<Badge className="text-xs" variant="destructive">
-			<XCircle className="h-[12px] w-[12px]" />
+		<Badge
+			className="shrink-0 gap-1 whitespace-nowrap text-xs"
+			variant="destructive">
+			<XCircle className="h-[12px] w-[12px] shrink-0" />
 			API Key 未配置
 		</Badge>
 	);

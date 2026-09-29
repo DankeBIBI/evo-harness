@@ -9,6 +9,7 @@
 export { askUserTool } from './askUser';
 export { fileTools } from './fileTools';
 export { getToolDefTool, listToolsTool } from './metaTools';
+export { loadSkillTool } from './skillTools';
 export { grepFilesTool, replaceInFileRegexTool } from './regexTools';
 export {
   submitPlanTool,

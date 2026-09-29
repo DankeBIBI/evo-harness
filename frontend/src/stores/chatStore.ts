@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useTodoStore } from "./todoStore";
 import { useDebugLogStore } from "./debugLogStore";
 import type { DebugLog } from "@/types/debugLog";
+import type { ChatMessage } from "@/lib/chat/protocol";
 
 import { nowTimestamp, write as writeLog } from "@/lib/storage/logStore";
 import { devLog } from "@/lib/devLog";
@@ -43,6 +44,14 @@ export interface Message {
 	error?: string;
 	id: string;
 	modelId?: string;
+	/** Anthropic 原始 assistant 内容块，用于下一轮协议回传。 */
+	providerContentBlocks?: Array<Record<string, unknown>>;
+	/** MiniMax/OpenAI-compatible 原始 reasoning_details。 */
+	reasoningDetails?: Array<Record<string, unknown>>;
+	/** 工具续传期间的标准化原始消息顺序，用于后续用户轮完整回传。 */
+	providerTranscript?: ChatMessage[];
+	/** 本轮用户引用过的文件路径,用于后续轮次恢复工作区上下文 */
+	referencedFiles?: string[];
 	/** AI 原始完整输出（含 tool_call/tool_result 等所有标签），仅用于查看原始数据 */
 	rawContent?: string;
 	role: MessageRole;
@@ -634,24 +643,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 		set((state) => {
 			const newConversations = state.conversations.map((conv) => {
 				if (conv.id !== id) return conv;
-				const prev = conv.tokenStats || createEmptyTokenStats();
-				const nextCacheReadTokens =
-					prev.cacheReadTokens + tokenStats.cacheReadTokens;
-				const nextCacheCreationTokens =
-					prev.cacheCreationTokens + tokenStats.cacheCreationTokens;
-				const nextInputTokens = prev.inputTokens + tokenStats.inputTokens;
+				// 调用方传入的是当前会话累计快照；直接替换，避免第二轮起重复累加。
+				const cacheDenominator =
+					tokenStats.cacheReadTokens +
+					tokenStats.cacheCreationTokens +
+					tokenStats.inputTokens;
 				return {
 					...conv,
 					tokenStats: {
-						cacheCreationTokens: nextCacheCreationTokens,
-						cacheReadTokens: nextCacheReadTokens,
+						cacheCreationTokens: tokenStats.cacheCreationTokens,
+						cacheReadTokens: tokenStats.cacheReadTokens,
 						hitRate:
-							nextInputTokens > 0 ? nextCacheReadTokens / nextInputTokens : 0,
-						inputTokens: nextInputTokens,
+							cacheDenominator > 0
+								? tokenStats.cacheReadTokens / cacheDenominator
+								: 0,
+						inputTokens: tokenStats.inputTokens,
 						lastTurnCacheRead: tokenStats.lastTurnCacheRead,
-						outputTokens: prev.outputTokens + tokenStats.outputTokens,
-						totalCostCny: prev.totalCostCny + tokenStats.totalCostCny,
-						totalTokens: prev.totalTokens + tokenStats.totalTokens,
+						outputTokens: tokenStats.outputTokens,
+						totalCostCny: tokenStats.totalCostCny,
+						totalTokens:
+							tokenStats.totalTokens ||
+							tokenStats.inputTokens +
+								tokenStats.outputTokens +
+								tokenStats.cacheReadTokens +
+								tokenStats.cacheCreationTokens,
 					},
 				};
 			});

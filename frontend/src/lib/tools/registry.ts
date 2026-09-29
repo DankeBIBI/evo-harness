@@ -14,20 +14,14 @@ import { useToolConfirmStore } from "@/stores/toolConfirmStore";
 import { useToolPermissionStore } from "@/stores/toolPermissionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSkillStore, type Skill } from "@/stores/skillStore";
-import {
-	type ChatEvent,
-	makeToolCallArgsDelta,
-	makeToolCallArgsDone,
-	makeToolCallBegin,
-	makeToolCallResult,
-	type TurnId,
-} from "../../chat/protocol/events";
+import { devLog } from "@/lib/devLog";
 import {
 	askUserTool,
 	fileTools,
 	getToolDefTool,
 	grepFilesTool,
 	listToolsTool,
+	loadSkillTool,
 	replaceInFileRegexTool,
 	submitPlanTool,
 	todoAddTool,
@@ -54,72 +48,6 @@ export function toPascalCase(name: string): string {
 		.replace(/^(.)/, (_, c) => c.toUpperCase());
 }
 
-/** Tool name -> canonical tool name alias map. */
-export const toolNameAliases: Record<string, string> = {
-	Glob: "SearchFiles",
-	Grep: "GrepFiles",
-	List: "ListDir",
-	Read: "ReadFile",
-	Delete: "DeleteFile",
-	Remove: "DeleteFile",
-	Replace: "ReplaceInFile",
-	Edit: "ReplaceInFile",
-	Search: "SearchFiles",
-	Write: "WriteFile",
-	GrepRegex: "GrepFiles",
-	GrepContent: "GrepFiles",
-	RegexSearch: "GrepFiles",
-	RegexReplace: "ReplaceInFileRegex",
-	ReplaceRegex: "ReplaceInFileRegex",
-	FileDelete: "DeleteFile",
-	FileRemove: "DeleteFile",
-	FileReplace: "ReplaceInFile",
-	FileEdit: "ReplaceInFile",
-	FileRead: "ReadFile",
-	FileWrite: "WriteFile",
-	FileSearch: "SearchFiles",
-	DirList: "ListDir",
-	ListDirectory: "ListDir",
-	ListDir: "ListDir",
-	GrepFiles: "GrepFiles",
-	ReplaceInFileRegex: "ReplaceInFileRegex",
-	// 2026-07-23: 工具名统一 PascalCase,canonical 名直接用 PascalCase
-	// camelCase 简称作为 alias 兜底(防 LLM 偶尔发 PascalCase 驼峰混入),snake_case 旧键已全部清理
-	submitPlan: "SubmitPlan",
-	todoWrite: "TodoWrite",
-	todoAdd: "TodoAdd",
-	todoList: "TodoList",
-	todoToggle: "TodoToggle",
-	todoUpdateStatus: "TodoUpdateStatus",
-	todoEdit: "TodoEdit",
-	todoSetPriority: "TodoSetPriority",
-	todoDelete: "TodoDelete",
-	todoClearCompleted: "TodoClearCompleted",
-	// Meta tools (auto-discovery)
-	listTools: "ListTools",
-	getToolDef: "GetToolDef",
-	// Interactive tool
-	askUser: "AskUser",
-	readfile: "ReadFile",
-	writefile: "WriteFile",
-	deletefile: "DeleteFile",
-	replaceinfile: "ReplaceInFile",
-	searchfiles: "SearchFiles",
-	listdir: "ListDir",
-	delete: "DeleteFile",
-	remove: "DeleteFile",
-	replace: "ReplaceInFile",
-	edit: "ReplaceInFile",
-	glob: "SearchFiles",
-	grep: "GrepFiles",
-	read: "ReadFile",
-	write: "WriteFile",
-	search: "SearchFiles",
-	list: "ListDir",
-	replaceinfileregex: "ReplaceInFileRegex",
-	grepfiles: "GrepFiles",
-};
-
 /** Initialize the registry with all built-in tools. */
 function initRegistry() {
 	for (const tool of fileTools) toolRegistry.set(tool.name, tool);
@@ -141,19 +69,49 @@ function initRegistry() {
 	// Meta tools: discoverability
 	toolRegistry.set(listToolsTool.name, listToolsTool);
 	toolRegistry.set(getToolDefTool.name, getToolDefTool);
+	toolRegistry.set(loadSkillTool.name, loadSkillTool);
 }
 
 initRegistry();
+
+/**
+ * 从注册表现有工具名派生小写/驼峰两种机械变体别名。
+ *
+ * 只保留机械变体覆盖历史会话回放与 LLM 偶发的大小写漂移;
+ * 同义词猜测(Glob/Grep/Edit 等手工映射)已删除——canonical 名经原生 toolsSchema
+ * 下发后模型服从率极高,同义词兑底只剩误匹配风险(会劫持同名 skill)。
+ */
+function buildToolNameAliases(): Record<string, string> {
+	const aliases: Record<string, string> = {};
+	for (const name of toolRegistry.keys()) {
+		aliases[name.toLowerCase()] = name;
+		const camel = name.charAt(0).toLowerCase() + name.slice(1);
+		if (camel !== name) {
+			aliases[camel] = name;
+		}
+		// snake/kebab 变体(read_file),兑现 GetToolDef 对 snake_case 入参的兼容承诺
+		const snake = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+		if (snake !== name) {
+			aliases[snake] = name;
+		}
+	}
+	return aliases;
+}
+
+/** Tool name -> canonical tool name alias map(从注册表派生,单一事实来源). */
+export const toolNameAliases: Record<string, string> = buildToolNameAliases();
 
 /** Set the current model config (used for tool filtering / protocol selection). */
 export function setModelConfig(config: ModelConfig | null) {
 	currentModelConfig = config;
 }
 
-/** Get the current protocol name from the model config provider field. */
-export function getCurrentProtocol(): ToolProtocol {
-	if (!currentModelConfig) return "openai";
-	switch (currentModelConfig.provider.toLowerCase()) {
+/** Get the protocol name for a model config(缺省用 setModelConfig 设置的全局值). */
+export function getCurrentProtocol(
+	config: ModelConfig | null = currentModelConfig,
+): ToolProtocol {
+	if (!config) return "openai";
+	switch (config.provider.toLowerCase()) {
 		case "anthropic":
 			return "anthropic";
 		case "azure":
@@ -168,92 +126,112 @@ export function getCurrentProtocol(): ToolProtocol {
 	}
 }
 
-/** All registered tool names, including alias entries. */
-export function getAllToolNames(): Set<string> {
-	const names = new Set<string>();
-	for (const name of toolRegistry.keys()) names.add(name);
-	for (const alias of Object.keys(toolNameAliases)) names.add(alias);
-	return names;
-}
-
-/** Check whether a tool name is valid (registered name OR alias). */
-export function isValidToolName(name: string): boolean {
-	return toolRegistry.has(name) || name in toolNameAliases;
-}
+const LOG = "chat:toolRegistry";
 
 /**
- * Build a fallback ToolCall from a native stream chunk (used when the upstream
- * provider sent no `id` — uncommon but allowed). Preserves the original
- * PascalCase + raw-name so runToolCallBody can still hit the skill store.
+ * 工具执行上下文(可注入覆盖,缺省直读 zustand store)。
+ * 显式传参让 registry 脱离全局可变状态可单测,也为多会话隔离留出口。
  */
-function buildNativeCallFromChunk(input: {
-	args: string;
-	id: string;
-	index: number;
-	name: string;
-}): { call: ToolCall; originalId: string; originalName: string } {
-	const originalId = input.id || `native-${input.index}`;
-	let parsed: Record<string, unknown> = {};
-	if (input.args.trim()) {
-		try {
-			parsed = JSON.parse(input.args.trim());
-		} catch {
-			parsed = { _raw: input.args.trim() };
+export interface ToolRunContext {
+	/** 当前模型配置(推导协议名);缺省用 setModelConfig 设置的全局值 */
+	modelConfig?: ModelConfig | null;
+	/** 全局档位;缺省读 settingsStore.toolMode */
+	toolMode?: "auto" | "edit" | "plan";
+	/** 单工具权限解析;缺省读 toolPermissionStore */
+	getPermission?: (toolName: string) => "auto" | "ask" | "disabled";
+}
+
+/** Levenshtein 编辑距离(短串专用,无性能优化需求) */
+function levenshtein(a: string, b: string): number {
+	if (a === b) {
+		return 0;
+	}
+
+	const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => {
+		const row = Array<number>(b.length + 1).fill(0);
+		row[0] = i;
+		return row;
+	});
+	for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+	for (let i = 1; i <= a.length; i++) {
+		for (let j = 1; j <= b.length; j++) {
+			dp[i][j] = Math.min(
+				dp[i - 1][j] + 1,
+				dp[i][j - 1] + 1,
+				dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+			);
 		}
 	}
-	return {
-		call: { id: originalId, input: parsed, name: input.name },
-		originalId,
-		originalName: input.name,
-	};
+	return dp[a.length][b.length];
 }
 
-// Tool-permission checker (injected by ToolPermissionStore).
-let permissionChecker:
-	| ((toolName: string) => "auto" | "ask" | "disabled")
-	| null = null;
+/** Unknown tool 时给出最接近的候选名(编辑距离 ≤2 或大小写不敏感包含),让 AI 一轮自纠 */
+function suggestToolNames(input: string): string[] {
+	if (!input) {
+		return [];
+	}
 
-/** Inject a permission checker. */
-export function setToolPermissionChecker(
-	fn: (toolName: string) => "auto" | "ask" | "disabled",
-) {
-	permissionChecker = fn;
+	const lower = input.toLowerCase();
+	return [...toolRegistry.keys()]
+		.map((n) => ({ d: levenshtein(lower, n.toLowerCase()), n }))
+		.filter(
+			(x) =>
+				x.d <= 2 ||
+				x.n.toLowerCase().includes(lower) ||
+				lower.includes(x.n.toLowerCase()),
+		)
+		.sort((a, b) => a.d - b.d)
+		.slice(0, 3)
+		.map((x) => x.n);
 }
+
+/** 按调用名查知识型 skill(canonical 未命中时才查,支持 PascalCase 归一化匹配) */
+function findSkillByCallName(name: string): Skill | undefined {
+	const normalized = name.trim().replace(/^\/+/, '').toLowerCase();
+	const candidates = new Set([
+		normalized,
+		toPascalCase(normalized).toLowerCase(),
+	]);
+	return useSkillStore.getState().skills.find((skill) =>
+		candidates.has(skill.name.trim().replace(/^\/+/, '').toLowerCase()),
+	);
+}
+
+/** 写类工具按资源 key(文件路径)串行化的锁表:key -> 当前执行链(永不 reject) */
+const resourceLocks = new Map<string, Promise<unknown>>();
 
 /**
- * Event emitter for the canonical tool-call lifecycle:
- *   tool_call_begin -> tool_call_args_delta -> tool_call_args_done -> tool_call_result
- * Callers that don't need the stream (see the `executeToolCall` shim below) pass a noop.
+ * 从工具入参提取资源 key(path / filePath / dirPath 任一非空字符串)。
+ * 归一化仅做分隔符统一 + 小写:Windows 大小写不敏场景可正确互斥;
+ * Linux 大小写敏感场景会过度串行化(只损并行度不出错);
+ * 相对/绝对拼写差异不会合并为同一 key(极端时少串行一次,偏安全侧)
  */
-export type ToolCallEventEmitter = (event: ChatEvent) => void;
+function resourceKeyOf(input: Record<string, unknown>): string | null {
+	const raw = input.path ?? input.filePath ?? input.dirPath;
+	if (typeof raw !== "string" || raw === "") {
+		return null;
+	}
 
-const noopToolCallEmitter: ToolCallEventEmitter = () => {};
+	return raw.replace(/\\/g, "/").toLowerCase();
+}
 
-/** plan 模式白名单(原名 READ_ONLY_TOOLS,实际语义是「plan 档位下允许执行」)
- *  - 真正只读工具:ReadFile / SearchFiles / ListDir / GrepFiles / ListTools / GetToolDef
- *  - plan 阶段需要的写工具:SubmitPlan(提交计划待用户审批)+ 全部 Todo*(AI 先建任务清单)
- *  canonical 名以 PascalCase 为主(2026-07-23 统一)
- */
-const READ_ONLY_TOOLS = new Set([
-	"ReadFile",
-	"ReadFileRange",
-	"SearchFiles",
-	"ListDir",
-	"GrepFiles",
-	"ListTools",
-	"GetToolDef",
-	"SubmitPlan",
-	"AskUser",
-	"TodoWrite",
-	"TodoList",
-	"TodoAdd",
-	"TodoToggle",
-	"TodoUpdateStatus",
-	"TodoEdit",
-	"TodoSetPriority",
-	"TodoDelete",
-	"TodoClearCompleted",
-]);
+/** 同一资源路径上的写操作排队执行,防并发 read-modify-write 交错丢更新 */
+function runWithResourceLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+	const prev = resourceLocks.get(key) ?? Promise.resolve();
+	const run = prev.then(fn, fn);
+	// 锁链上只挂永不 reject 的 settled 版本,避免未处理 rejection 在锁表内累积
+	const settled = run.then(
+		() => undefined,
+		() => undefined,
+	);
+	resourceLocks.set(key, settled);
+	void settled.finally(() => {
+		if (resourceLocks.get(key) === settled) {
+			resourceLocks.delete(key);
+		}
+	});
+	return run;
+}
 
 /**
  * 知识型 skill "声明式调用": AI 输出 `<tool_call name="<skill.name>">` 时,
@@ -277,86 +255,85 @@ function invokeSkill(skill: Skill, input: Record<string, unknown>): string {
 	if (input && Object.keys(input).length > 0) {
 		parts.push(`调用参数: ${JSON.stringify(input)}`);
 	}
-	if (skill.code) {
-		parts.push(`\n--- skill 内容 ---\n${skill.code}`);
+	const body = skill.content || skill.code;
+	if (body) {
+		parts.push(`\n--- skill 内容 ---\n${body}`);
 	}
 	return parts.join("\n");
 }
 
 /**
  * Shared worker: registry lookup, permission check, confirm-store handshake,
- * and the actual tool.execute call. Both public entry points funnel through
- * this so the two paths cannot drift.
+ * and the actual tool.execute call. All execution paths funnel through this.
+ *
+ * 解析优先级:canonical 注册名 > 知识型 skill > 别名表。
+ * skill 查找放在别名解析之前,修复「skill 名恰为别名键(如 Read/Edit)时被静默劫持到
+ * 文件工具」的问题;canonical 直接命中时不查 skill,避免同名 skill 遮蔽真实工具。
  */
-async function runToolCallBody(call: ToolCall): Promise<ToolResult> {
-	const realName = toolNameAliases[call.name] || call.name;
-	const tool = toolRegistry.get(realName);
-	const protocol = getCurrentProtocol();
+async function runToolCallBody(
+	call: ToolCall,
+	ctx?: ToolRunContext,
+): Promise<ToolResult> {
+	const directTool = toolRegistry.get(call.name);
+	if (!directTool) {
+		// 知识型 skill 不是 tool,但允许 AI 用 `<tool_call name="<skill.name>">` 声明式调用:
+		// 找到 → 返回 skill 内容作为 tool_result(AI 读完后基于其内容继续作答)。
+		// skill 只返回文本不落盘,plan 档位下同样放行(属只读知识加载)。
+		const skill = findSkillByCallName(call.name);
+		if (skill) {
+			return { id: call.id, output: invokeSkill(skill, call.input) };
+		}
+	}
 
-	console.log("[executeToolCall]", {
-		protocol,
+	const realName = directTool
+		? call.name
+		: toolNameAliases[call.name] || call.name;
+	const tool = directTool ?? toolRegistry.get(realName);
+	const protocol = getCurrentProtocol(ctx?.modelConfig);
+
+	devLog.d(LOG, "executeToolCall", {
 		callName: call.name,
+		protocol,
 		realName,
-		registeredTools: [...toolRegistry.keys()],
 		toolFound: !!tool,
 	});
 
 	if (!tool) {
-		// 查 skillStore: 知识型 skill 不是 tool,但允许 AI 用 `<tool_call name="<skill.name>">` 声明式调用
-		// 找到 → 返回 skill 内容作为 tool_result(AI 读完后会基于其内容继续作答)
-		// 注意: call.name 已被 toPascalCase 转换,需按原始 name 查找
-		const rawName =
-			(call as ToolCall & { _rawName?: string })._rawName || call.name;
-		const skill = useSkillStore
-			.getState()
-			.skills.find(
-				(s) =>
-					s.name === rawName || s.name === call.name || s.name === realName,
-			);
-		if (skill) {
-			return { id: call.id, output: invokeSkill(skill, call.input) };
-		}
+		// 错误信息附最接近候选 + 完整可用列表,AI 无需再花一轮 ListTools 即可自纠
+		const suggestions = suggestToolNames(call.name);
+		const available = [...toolRegistry.keys()].sort((a, b) =>
+			a.localeCompare(b),
+		);
 		return {
-			error: `Unknown tool [${protocol}]: ${call.name}`,
+			error:
+				`Unknown tool [${protocol}]: ${call.name}` +
+				(suggestions.length > 0 ? ` (closest: ${suggestions.join(", ")})` : "") +
+				`. Available tools: ${available.join(", ")}. ` +
+				"Call GetToolDef(name=...) to inspect parameters before retrying.",
 			id: call.id,
 			output: "",
 		};
 	}
 
-	// 全局档位优先:plan / auto 直接覆盖单工具 mode
-	const toolMode = useSettingsStore.getState().toolMode;
-	if (toolMode === "plan" && !READ_ONLY_TOOLS.has(realName)) {
+	// 全局档位优先:plan / auto 直接覆盖单工具 mode。
+	// plan 门禁由工具定义上的 mutating/planAllowed 标志驱动(单一事实来源,不再维护手抄白名单)
+	const toolMode = ctx?.toolMode ?? useSettingsStore.getState().toolMode;
+	if (
+		toolMode === "plan" &&
+		tool.mutating === true &&
+		tool.planAllowed !== true
+	) {
 		return {
 			error: `当前为「计划」档位,禁止执行 ${realName}(可切到「编辑」或「自动」)`,
 			id: call.id,
 			output: "",
 		};
 	}
-	if (toolMode === "auto") {
-		// 自动档:即便绕过 permission check,被管理员 disabled 的工具仍要拦截
-		const mode = permissionChecker?.(realName) || "auto";
-		if (mode === "disabled") {
-			return {
-				error: `Tool ${realName} is disabled by administrator`,
-				id: call.id,
-				output: "",
-			};
-		}
-		// 直接执行,不弹窗、不走单工具 mode
-		try {
-			const output = await tool.execute(call.input, call);
-			return { id: call.id, output };
-		} catch (error) {
-			return {
-				error: error instanceof Error ? error.message : String(error),
-				id: call.id,
-				output: "",
-			};
-		}
-	}
 
-	// Permission check(edit 档:按单工具 mode)
-	const mode = permissionChecker?.(realName) || "auto";
+	// 权限直读 store(废除 ChatWindow useEffect 注入,消除挂载前 checker 为 null 的 fail-open 窗口)
+	const mode =
+		ctx?.getPermission?.(realName) ??
+		(useToolPermissionStore.getState().getPermission(realName) || "auto");
 	if (mode === "disabled") {
 		return {
 			error: `Tool ${realName} is disabled by administrator`,
@@ -365,7 +342,13 @@ async function runToolCallBody(call: ToolCall): Promise<ToolResult> {
 		};
 	}
 
-	if (mode === "ask") {
+	// auto 档直通单工具 ask;但高危工具(danger,如 DeleteFile)默认仍强制确认,
+	// 用户对它点过「始终允许」(权限=auto)后不再重复弹窗
+	const needConfirm =
+		toolMode === "auto"
+			? tool.danger === true && mode !== "auto"
+			: mode === "ask";
+	if (needConfirm) {
 		const keyParam =
 			(call.input.path as string) ||
 			(call.input.command as string) ||
@@ -389,7 +372,11 @@ async function runToolCallBody(call: ToolCall): Promise<ToolResult> {
 	}
 
 	try {
-		const output = await tool.execute(call.input, call);
+		// 写类(mutating)且能提取资源路径 → 排队串行执行,防并发写交错丢更新
+		const lockKey = tool.mutating === true ? resourceKeyOf(call.input) : null;
+		const output = lockKey
+			? await runWithResourceLock(lockKey, () => tool.execute(call.input, call))
+			: await tool.execute(call.input, call);
 		return { id: call.id, output };
 	} catch (error) {
 		return {
@@ -401,94 +388,21 @@ async function runToolCallBody(call: ToolCall): Promise<ToolResult> {
 }
 
 /**
- * Function that actually runs a tool call and returns its result.
+ * Execute a single tool call through the registry:
+ * 名称解析(canonical > skill > alias)、plan 门禁、权限检查、confirm 握手、
+ * 写串行化与 tool.execute 全部在此收敛。
  *
- * `executeToolCallWithEvents` uses the registry's `runToolCallBody` as
- * the default. Higher-level orchestrators (e.g. `ToolCallExecutor`)
- * inject their own `runTool` to add pre-checks like a storm-breaker
- * or to route execution through a different backend. The event
- * lifecycle (begin / args_delta / args_done / result) fires regardless
- * of what the runner returns.
+ * `ctx` 可注入覆盖模型配置/档位/权限解析(缺省直读 zustand store),
+ * 便于单测与多会话隔离。
  */
-export type ToolRunner = (call: ToolCall) => Promise<ToolResult>;
-
-/**
- * Execute a single tool call, emitting the canonical
- * tool_call_begin / args_delta / args_done / result event sequence
- * via the supplied emitter.
- *
- * The emitted turnId defaults to `tool-${call.id}`; emitters that need
- * the real session turnId (e.g. the live session reducer) should close
- * over the correct value or re-stamp the event before dispatch.
- *
- * If `runTool` is omitted, the default `runToolCallBody` is used, which
- * goes through the registry, permission check, confirm handshake, and
- * tool.execute. Custom runners can short-circuit with a synthetic result
- * (e.g. for storm-suppressed calls) without losing the event stream.
- */
-export async function executeToolCallWithEvents(
+export async function executeToolCall(
 	call: ToolCall,
-	emit: ToolCallEventEmitter = noopToolCallEmitter,
-	runTool: ToolRunner = runToolCallBody,
+	ctx?: ToolRunContext,
 ): Promise<ToolResult> {
-	const turnId: TurnId = `tool-${call.id}`;
-
-	emit(makeToolCallBegin(turnId, call.id, call.name));
-
-	const argsText = JSON.stringify(call.input ?? {});
-	if (argsText) {
-		emit(makeToolCallArgsDelta(turnId, call.id, argsText));
-	}
-	let parsedArgs: Record<string, unknown> | null = null;
-	try {
-		const parsed = JSON.parse(argsText);
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			parsedArgs = parsed as Record<string, unknown>;
-		}
-	} catch {
-		parsedArgs = null;
-	}
-	emit(makeToolCallArgsDone(turnId, call.id, parsedArgs));
-
-	const result = await runTool(call);
-	emit(makeToolCallResult(turnId, call.id, result));
-	return result;
-}
-
-/**
- * Backward-compatible shim. Existing `Promise<ToolResult>` callers (e.g.
- * useChatStreaming.ts) keep working unchanged while the new event path
- * is wired up incrementally.
- */
-export async function executeToolCall(call: ToolCall): Promise<ToolResult> {
-	return executeToolCallWithEvents(call, noopToolCallEmitter);
-}
-
-/** Register a single tool. The protocol parameter is kept for backward compat. */
-export function registerTool(tool: Tool, _protocol: ToolProtocol = "openai") {
-	toolRegistry.set(tool.name, tool);
-}
-
-/** Register a batch of tools. */
-export function registerTools(
-	tools: Tool[],
-	protocol: ToolProtocol = "openai",
-) {
-	tools.forEach((tool) => registerTool(tool, protocol));
+	return runToolCallBody(call, ctx);
 }
 
 /** Get all registered tools. */
 export function getRegisteredTools(): Tool[] {
 	return [...toolRegistry.values()];
-}
-
-/** Build a JSON-formatted tool list for the AI prompt. */
-export function buildToolsForAI(): string {
-	const tools = getRegisteredTools();
-	const toolsJson = JSON.stringify(
-		tools.map((t) => ({ description: t.description, name: t.name })),
-		null,
-		2,
-	);
-	return `Available tools:\n${toolsJson}`;
 }

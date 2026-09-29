@@ -1,31 +1,25 @@
 import { cn } from "@/lib/utils";
 import {
 	Bot,
-	ChevronLeft,
 	ChevronRight,
-	ChevronsLeft,
-	ChevronsRight,
 	ChevronsUpDown,
-	ExternalLink,
 	FileText,
+	Inbox,
 	Lightbulb,
-	Maximize2,
 	Plug,
 	Plus,
 	Search,
 	Terminal,
 	Wrench,
-	X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/Input";
-import { SidebarItem } from "@/components/common/SidebarItem";
-import { useAgentStore } from "@/stores/agentStore";
+import { formatAgentName, useEnabledAgents, useAgentStore } from "@/stores/agentStore";
 import { type AgentCategory } from "@/stores/layoutStore";
 import { useMCPStore } from "@/stores/mcpStore";
-import { usePromptStore } from "@/stores/promptStore";
-import { useSkillStore } from "@/stores/skillStore";
+import { formatSkillName, useEnabledSkills, useSkillStore } from "@/stores/skillStore";
+import { useSourceStore } from "@/stores/sourceStore";
 
 import { categoryContent, type CategoryContent } from "./agentCategoryContent";
 
@@ -68,15 +62,20 @@ export function AgentManagerContent({
 	useEffect(() => {
 		setQuery("");
 	}, [activeCategory]);
-	const agents = useAgentStore((s) => s.agents);
-	const prompts = usePromptStore((s) => s.prompts);
-	const skills = useSkillStore((s) => s.skills);
+	const agents = useEnabledAgents();
+	const skills = useEnabledSkills();
+	const fetchAgents = useAgentStore((s) => s.fetchAgents);
+	const fetchSkills = useSkillStore((s) => s.fetchSkills);
+	const toggleSkill = useSkillStore((s) => s.toggleSkill);
+	const selectedSkillIds = useSkillStore((s) => s.selectedSkillIds);
+	const showSourceLabel = useSourceStore((s) => s.config.showSourceLabel);
 	const mcpServers = useMCPStore((s) => s.servers);
 	const loadMCP = useMCPStore((s) => s.load);
 
 	useEffect(() => {
 		loadMCP();
-	}, [loadMCP]);
+		void Promise.all([fetchAgents(), fetchSkills()]);
+	}, [fetchAgents, fetchSkills, loadMCP]);
 
 	const content = useMemo<CategoryContent>(() => {
 		const base = categoryContent[activeCategory];
@@ -89,7 +88,7 @@ export function AgentManagerContent({
 						label: "已导入",
 						items: agents.map((agent) => ({
 							description: agent.description || agent.role || "暂无描述",
-							name: agent.name,
+							name: formatAgentName(agent, showSourceLabel),
 						})),
 					},
 				],
@@ -97,33 +96,19 @@ export function AgentManagerContent({
 		}
 
 		if (activeCategory === "skills") {
-			const toggleSkill = useSkillStore.getState().toggleSkill;
-			const selectedSkillIds = useSkillStore((s) => s.selectedSkillIds);
+			const selectedVisibleCount = skills.filter((skill) =>
+				selectedSkillIds.includes(skill.id),
+			).length;
 			return {
 				...base,
 				groups: [
 					{
-						label: `已导入 (${selectedSkillIds.length}/${skills.length} 已选)`,
+						label: `已导入 (${selectedVisibleCount}/${skills.length} 已选)`,
 						items: skills.map((skill) => ({
 							active: selectedSkillIds.includes(skill.id),
 							description: skill.description || skill.type || "暂无描述",
-							name: skill.name,
+							name: formatSkillName(skill, showSourceLabel),
 							onClick: () => toggleSkill(skill.id),
-						})),
-					},
-				],
-			};
-		}
-
-		if (activeCategory === "prompts") {
-			return {
-				...base,
-				groups: [
-					{
-						label: "已添加",
-						items: prompts.map((prompt) => ({
-							description: prompt.content || "暂无描述",
-							name: prompt.name,
 						})),
 					},
 				],
@@ -146,19 +131,34 @@ export function AgentManagerContent({
 		}
 
 		return base;
-	}, [activeCategory, agents, mcpServers, prompts, skills]);
+	}, [
+		activeCategory,
+		agents,
+		mcpServers,
+		selectedSkillIds,
+		showSourceLabel,
+		skills,
+		toggleSkill,
+	]);
 
-	const categoryCounts = useMemo<Record<AgentCategory, number>>(
-		() => ({
-			agents: agents.length,
-			cli: 0,
-			hooks: 0,
-			mcp: mcpServers.length,
-			plugins: 0,
-			prompts: prompts.length,
-			skills: skills.length,
-		}),
-		[agents.length, mcpServers.length, prompts.length, skills.length],
+	/** 单次遍历:按关键词过滤分组,同时派生"是否有可见项"驱动空状态 */
+	const visibleGroups = useMemo(() => {
+		if (!query) {
+			return content.groups;
+		}
+
+		const q = query.toLowerCase();
+
+		return content.groups.map((group) => ({
+			...group,
+			items: group.items.filter((it) =>
+				it.name.toLowerCase().includes(q),
+			),
+		}));
+	}, [content, query]);
+	const hasVisible = useMemo(
+		() => visibleGroups.some((g) => g.items.length > 0),
+		[visibleGroups],
 	);
 
 	return (
@@ -168,23 +168,23 @@ export function AgentManagerContent({
 			<div className="flex min-h-0 flex-1 flex-col">
 				{/* 标题 + 描述 */}
 				<div className="px-6 pt-5">
-					<h2 className="text-foreground text-lg font-semibold">
+					<h2 className="text-foreground text-base font-semibold">
 						{content.title}
-						</h2>
-						<p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
-							{content.description}{" "}
-							<a className="text-primary hover:text-primary/80 cursor-pointer">
-								{content.linkLabel}
-							</a>
-						</p>
-					</div>
+					</h2>
+					<p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
+						{content.description}{" "}
+						<a className="text-primary hover:text-primary/80 cursor-pointer">
+							{content.linkLabel}
+						</a>
+					</p>
+				</div>
 
 					{/* 搜索 + 新建 */}
 					<div className="mt-4 flex items-center gap-2 px-6">
-						<div className="bg-muted/30 border-border/40 flex h-8 flex-1 items-center gap-2 rounded-md border px-3">
-							<Search className="text-muted-foreground h-[14px] w-[14px]" />
+						<div className="bg-background border-border/60 focus-within:border-primary/40 flex min-h-9 flex-1 items-center gap-2 rounded-md border px-3 py-1.5 transition-colors duration-150 focus-within:ring-2 focus-within:ring-primary/10">
+							<Search className="text-muted-foreground h-4 w-4 shrink-0" />
 							<Input
-								className="bg-transparent text-foreground placeholder:text-muted-foreground/60 h-6 border-0 p-0 text-xs shadow-none focus-visible:ring-0"
+								className="bg-transparent text-foreground placeholder:text-muted-foreground/50 h-auto border-0 p-0 text-xs shadow-none focus-visible:ring-0"
 								onChange={(e) => setQuery(e.target.value)}
 								placeholder="输入以搜索..."
 								value={query}
@@ -195,31 +195,44 @@ export function AgentManagerContent({
 
 					{/* 列表 */}
 					<div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
-						{content.groups.map((group) => (
+						{visibleGroups.map((group) => (
 							<GroupSection
 								count={group.items.length}
 								key={group.label}
 								label={group.label}>
-								{group.items
-									.filter((it) =>
-										query
-											? it.name.toLowerCase().includes(query.toLowerCase())
-											: true,
-									)
-									.map((it) => (
-										<div
-											className="border-border/40 hover:bg-accent/20 border-b px-1 py-3 transition-colors duration-150 last:border-b-0"
-											key={it.name}>
-											<div className="text-foreground/90 text-xs font-medium">
-												{it.name}
-											</div>
-											<div className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-relaxed">
-												{it.description}
-											</div>
+								{group.items.map((it) => (
+									<div
+										aria-pressed={it.onClick ? it.active === true : undefined}
+										className={cn(
+											"border-border/40 rounded-md border-b px-2 py-3 transition-colors duration-150 last:border-b-0",
+											it.onClick && "hover:bg-accent/20 cursor-pointer",
+											it.active && "bg-primary/10 ring-primary/20 ring-1",
+										)}
+										key={it.name}
+										onClick={it.onClick}
+										onKeyDown={(event) => {
+											if (it.onClick && (event.key === "Enter" || event.key === " ")) {
+												event.preventDefault();
+												it.onClick();
+											}
+										}}
+										role={it.onClick ? "button" : undefined}
+										tabIndex={it.onClick ? 0 : undefined}>
+										<div className="text-foreground/90 text-xs font-medium">
+											{it.name}
 										</div>
-									))}
+										<div className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-relaxed">
+											{it.description}
+										</div>
+									</div>
+								))}
 							</GroupSection>
 						))}
+
+						{/* 空状态:无数据或搜索无匹配 */}
+						{!hasVisible ? (
+							<EmptyState query={query} reset={() => setQuery("")} />
+						) : null}
 					</div>
 				</div>
 			</div>
@@ -278,13 +291,28 @@ function NewItemButton({ category }: { category: AgentCategory }) {
 
 	const [showScope, setShowScope] = useState(false);
 
+	const label = useMemo(() => {
+		const map: Record<AgentCategory, string> = {
+			cli: "命令",
+			agents: "智能体",
+			skills: "技能",
+			prompts: "指令",
+			hooks: "挂钩",
+			mcp: "MCP",
+			plugins: "插件",
+		};
+		return map[category] ?? category;
+	}, [category]);
+
+	const baseClass =
+		// min-h + py:高度随全局字体令牌自适应,避免固定高度下文字溢出
+		"bg-primary text-primary-foreground hover:bg-primary/90 flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors duration-150";
+
 	if (scope.length === 0) {
 		return (
-			<button
-				className="bg-primary text-primary-foreground hover:bg-primary/90 flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-150"
-				type="button">
-				<Plus className="h-[14px] w-[14px]" />
-				New {category}
+			<button className={baseClass} type="button">
+				<Plus className="h-4 w-4" />
+				新建{label}
 			</button>
 		);
 	}
@@ -292,12 +320,12 @@ function NewItemButton({ category }: { category: AgentCategory }) {
 	return (
 		<div className="relative">
 			<button
-				className="bg-primary text-primary-foreground hover:bg-primary/90 flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-150"
+				className={baseClass}
 				onClick={() => setShowScope((v) => !v)}
 				type="button">
-				<Plus className="h-[14px] w-[14px]" />
-				<span>New {category} (Workspace)</span>
-				<ChevronsUpDown className="h-[12px] w-[12px] opacity-70" />
+				<Plus className="h-4 w-4" />
+				<span>新建{label}</span>
+				<ChevronsUpDown className="h-3.5 w-3.5 opacity-70" />
 			</button>
 
 			{showScope && (
@@ -314,6 +342,9 @@ function NewItemButton({ category }: { category: AgentCategory }) {
 							"bg-popover border-border/60 absolute right-0 bottom-full z-50 mb-1 w-72 rounded-md border p-1 shadow-lg",
 							"animate-in fade-in-0 zoom-in-95 duration-150",
 						)}>
+						<div className="text-muted-foreground px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider">
+							选择写入位置
+						</div>
 						{scope.map((file) => (
 							<button
 								className="text-foreground/90 hover:bg-accent/40 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors duration-150"
@@ -323,12 +354,40 @@ function NewItemButton({ category }: { category: AgentCategory }) {
 									// TODO: 实际新建到 file
 								}}
 								type="button">
-								<ChevronsRight className="text-primary h-[12px] w-[12px]" />
+								<FileText className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
 								<span className="truncate font-mono">{file}</span>
 							</button>
 						))}
 					</div>
 				</>
+			)}
+		</div>
+	);
+}
+
+function EmptyState({ query, reset }: { query: string; reset: () => void }) {
+	return (
+		<div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+			<div className="bg-muted/40 border-border/40 flex h-12 w-12 items-center justify-center rounded-full border">
+				<Inbox className="text-muted-foreground h-5 w-5" />
+			</div>
+			<div className="space-y-1">
+				<p className="text-foreground/80 text-sm font-medium">
+					{query ? "未找到匹配项" : "暂无内容"}
+				</p>
+				<p className="text-muted-foreground text-xs">
+					{query
+						? `没有与“${query}”相关的结果`
+						: "点击右上角按钮即可创建"}
+				</p>
+			</div>
+			{query && (
+				<button
+					className="text-primary hover:text-primary/80 text-xs font-medium transition-colors duration-150"
+					onClick={reset}
+					type="button">
+					清除搜索
+				</button>
 			)}
 		</div>
 	);

@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { authorizeAndScanSource, rescanAllSources } from '@/lib/fs/source-scanner';
+import { hasSourceHandle } from '@/lib/fs/source-handle-store';
 import { useAgentStore } from '@/stores/agentStore';
 import {
   SOURCE_LABELS,
@@ -86,13 +87,29 @@ export default function SourcesSettingsView() {
   const fetchSkills = useSkillStore((s) => s.fetchSkills);
   const [refreshing, setRefreshing] = useState(false);
   const [scanError, setScanError] = useState<null | string>(null);
+  const [authorizedSources, setAuthorizedSources] = useState<Set<Source>>(new Set());
 
   useEffect(() => {
     void fetchConfig();
   }, [fetchConfig]);
 
+  useEffect(() => {
+    void (async () => {
+      const entries = await Promise.all(
+        TOGGLE_ITEMS.map(async ({ source }) => [source, await hasSourceHandle(source)] as const),
+      );
+      setAuthorizedSources(new Set(entries.filter(([, found]) => found).map(([source]) => source)));
+    })();
+  }, []);
+
   /** 切换后重拉列表(前端化后列表来自 localStorage,仅刷新缓存) */
   const handleToggle = async (source: SourceToggleItem['source']) => {
+    const enabled = readEnabled(config, source);
+    // 首次开启来源时直接要求选择目录，避免出现“已开启”但没有任何授权目录的假状态。
+    if (!authorizedSources.has(source)) {
+      await handleScanDirectory(source);
+      return;
+    }
     await toggleSource(source);
     await Promise.all([fetchAgents(), fetchSkills()]);
   };
@@ -104,8 +121,15 @@ export default function SourcesSettingsView() {
     try {
       const count = await authorizeAndScanSource(source);
       if (count === -1) return; // 用户取消选择,不提示
+      setAuthorizedSources((current) => new Set(current).add(source));
+      if (!readEnabled(useSourceStore.getState().config, source)) {
+        await toggleSource(source);
+      }
       if (count === 0) {
-        setScanError('未扫描到 Agent / Skill,请确认所选目录包含 agents/、skills/ 结构');
+        const hint = source.startsWith('claude-')
+          ? '目录已授权,但未扫描到定义。可选择 ~/.claude 或项目内 .claude 目录(自动扫描其下 agents/ + skills/ 与项目根目录)。'
+          : '目录已授权,但未扫描到定义。可选择项目根、skills/agents 目录，或直接选择含 SKILL.md / AGENT.md 的目录。';
+        setScanError(hint);
       }
       await Promise.all([fetchAgents(), fetchSkills()]);
     } catch (err) {
@@ -158,6 +182,7 @@ export default function SourcesSettingsView() {
         <CardContent className="space-y-3">
           {TOGGLE_ITEMS.map((item) => {
             const enabled = readEnabled(config, item.source);
+            const authorized = authorizedSources.has(item.source);
             const Icon = item.icon;
             return (
               <div
@@ -172,7 +197,9 @@ export default function SourcesSettingsView() {
                     <p className="font-medium">{item.title}</p>
                     <p className="text-muted-foreground text-sm">{item.desc}</p>
                     <p className="text-muted-foreground text-xs">
-                      当前: {enabled ? item.enabledText : '未启用'}
+                      当前: {authorized
+                        ? (enabled ? item.enabledText : '已授权，未启用')
+                        : '未授权目录'}
                     </p>
                   </div>
                 </div>

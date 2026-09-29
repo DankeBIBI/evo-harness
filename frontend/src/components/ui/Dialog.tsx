@@ -8,55 +8,48 @@ import * as React from 'react';
 /* ─── 动画 keyframes 工厂 ─── */
 
 function getKeyframes(anim: Exclude<DialogAnimation, 'default' | 'magic'>) {
+  const IN_OFFSET = '48px';
+  const OUT_OFFSET = '36px';
+  // 入场/退场各只有一对关键帧,速度曲线由全局单一缓动驱动,浏览器原生插值保证全程连续无顿挫
   const map: Record<string, { in: Keyframe[]; out: Keyframe[] }> = {
-    // 入场 = 4 帧关键帧模拟 spring 末段(微过冲 → 收敛)
-    // 退场 = 2 帧,无回弹,匀减速收回
     top: {
       in: [
-        { offset: 0, opacity: 0, transform: 'translate(-50%, -120%) scale(0.94)' },
-        { offset: 0.78, opacity: 1, transform: 'translate(-50%, -50%) scale(1.02)', easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
-        { offset: 0.92, opacity: 1, transform: 'translate(-50%, -50%) scale(0.99)', easing: 'linear' },
-        { offset: 1, opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
+        { opacity: 0, transform: `translate(-50%, calc(-50% - ${IN_OFFSET})) scale(0.95)` },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
       ],
       out: [
         { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
-        { opacity: 0, transform: 'translate(-50%, -120%) scale(0.96)' },
+        { opacity: 0, transform: `translate(-50%, calc(-50% - ${OUT_OFFSET})) scale(0.97)` },
       ],
     },
     bottom: {
       in: [
-        { offset: 0, opacity: 0, transform: 'translate(-50%, 20%) scale(0.94)' },
-        { offset: 0.78, opacity: 1, transform: 'translate(-50%, -50%) scale(1.02)', easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
-        { offset: 0.92, opacity: 1, transform: 'translate(-50%, -50%) scale(0.99)', easing: 'linear' },
-        { offset: 1, opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
+        { opacity: 0, transform: `translate(-50%, calc(-50% + ${IN_OFFSET})) scale(0.95)` },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
       ],
       out: [
         { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
-        { opacity: 0, transform: 'translate(-50%, 20%) scale(0.96)' },
+        { opacity: 0, transform: `translate(-50%, calc(-50% + ${OUT_OFFSET})) scale(0.97)` },
       ],
     },
     left: {
       in: [
-        { offset: 0, opacity: 0, transform: 'translate(-120%, -50%) scale(0.94)' },
-        { offset: 0.78, opacity: 1, transform: 'translate(-50%, -50%) scale(1.02)', easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
-        { offset: 0.92, opacity: 1, transform: 'translate(-50%, -50%) scale(0.99)', easing: 'linear' },
-        { offset: 1, opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
+        { opacity: 0, transform: `translate(calc(-50% - ${IN_OFFSET}), -50%) scale(0.95)` },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
       ],
       out: [
         { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
-        { opacity: 0, transform: 'translate(-120%, -50%) scale(0.96)' },
+        { opacity: 0, transform: `translate(calc(-50% - ${OUT_OFFSET}), -50%) scale(0.97)` },
       ],
     },
     right: {
       in: [
-        { offset: 0, opacity: 0, transform: 'translate(20%, -50%) scale(0.94)' },
-        { offset: 0.78, opacity: 1, transform: 'translate(-50%, -50%) scale(1.02)', easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
-        { offset: 0.92, opacity: 1, transform: 'translate(-50%, -50%) scale(0.99)', easing: 'linear' },
-        { offset: 1, opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
+        { opacity: 0, transform: `translate(calc(-50% + ${IN_OFFSET}), -50%) scale(0.95)` },
+        { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
       ],
       out: [
         { opacity: 1, transform: 'translate(-50%, -50%) scale(1)' },
-        { opacity: 0, transform: 'translate(20%, -50%) scale(0.96)' },
+        { opacity: 0, transform: `translate(calc(-50% + ${OUT_OFFSET}), -50%) scale(0.97)` },
       ],
     },
   };
@@ -120,11 +113,6 @@ function easeInQuad(value: number) {
   return t * t;
 }
 
-function easeOutQuad(value: number) {
-  const t = clamp01(value);
-  return 1 - (1 - t) * (1 - t);
-}
-
 function clearMagicInlineStyles(el: HTMLElement) {
   el.style.opacity = '';
   el.style.transform = '';
@@ -136,6 +124,7 @@ function clearMagicInlineStyles(el: HTMLElement) {
   el.style.willChange = '';
 }
 
+/** Genie 收缩帧渲染:2px 行高降低 drawImage 次数,收紧行间相位差让瀑布整体移动不撕裂 */
 function renderGenieFrame(
   ctx: CanvasRenderingContext2D,
   snapshot: HTMLCanvasElement,
@@ -147,15 +136,16 @@ function renderGenieFrame(
   targetRect: DOMRect,
 ) {
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-  const rowCount = Math.max(1, Math.floor(targetRect.height));
+  const ROW_H = 2;
+  const rowCount = Math.max(1, Math.ceil(targetRect.height / ROW_H));
 
-  for (let y = 0; y < rowCount; y += 1) {
-    const rowRatio = y / rowCount;
-    // 行间相位差从 0.65 缩到 0.35(Y 方向从 0.2 缩到 0.1),让瀑布更连贯
-    const rowXStart = direction === 'close' ? (1 - rowRatio) * 0.35 : rowRatio * 0.35;
+  for (let row = 0; row < rowCount; row += 1) {
+    const srcY = row * ROW_H;
+    const rowRatio = row / rowCount;
+    const rowXStart = direction === 'close' ? (1 - rowRatio) * 0.18 : rowRatio * 0.18;
     const xProgress = clamp((progress - rowXStart) / (1 - rowXStart), 0, 1);
     const xEase = easeInOutCubic(xProgress);
-    const rowYStart = direction === 'close' ? (1 - rowRatio) * 0.1 : rowRatio * 0.1;
+    const rowYStart = direction === 'close' ? (1 - rowRatio) * 0.06 : rowRatio * 0.06;
     const yProgress = clamp((progress - rowYStart) / (1 - rowYStart), 0, 1);
     const yEase = easeInQuad(yProgress);
     const left = direction === 'close'
@@ -165,28 +155,56 @@ function renderGenieFrame(
       ? lerp(targetRect.right, origin.x, xEase)
       : lerp(origin.x, targetRect.right, xEase);
     const destY = direction === 'close'
-      ? lerp(targetRect.top + y, origin.y, yEase)
-      : lerp(origin.y, targetRect.top + y, yEase);
+      ? lerp(targetRect.top + srcY, origin.y, yEase)
+      : lerp(origin.y, targetRect.top + srcY, yEase);
     const rowWidth = right - left;
 
     if (rowWidth < 0.8) continue;
 
-    ctx.drawImage(snapshot, 0, y, targetRect.width, 1, left, destY, rowWidth, 1);
+    ctx.drawImage(snapshot, 0, srcY, targetRect.width, ROW_H, left, destY, rowWidth, ROW_H);
   }
 
-  // 高光改为 easeInOutCubic 连续曲线,去掉 75% 突现阈值;alpha 上限从 0.3 降到 0.18 更克制
+  // 高光走 easeInOutCubic 连续曲线,alpha 上限 0.12 更克制,半径放大更柔和
   const glowProgress = direction === 'close' ? progress : 1 - progress;
-  const alpha = easeInOutCubic(glowProgress) * 0.18;
+  const alpha = easeInOutCubic(glowProgress) * 0.12;
   if (alpha < 0.01) return;
 
-  const gradient = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 55);
+  const gradient = ctx.createRadialGradient(origin.x, origin.y, 0, origin.x, origin.y, 72);
   gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
   gradient.addColorStop(1, 'transparent');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 }
 
-function runMagicMotion(el: HTMLElement, origin: Point, duration: number, direction: 'open' | 'close') {
+/** magic 打开:从触发点小尺寸模糊态 FLIP 展开到屏幕中央(纯变换动画,无截图等待,杜绝先闪现再动画) */
+function runMagicOpen(el: HTMLElement, origin: Point) {
+  if (typeof el.animate !== 'function') {
+    return { cancel() {} };
+  }
+
+  const safeOrigin = getPointOnViewport(origin);
+  const rect = el.getBoundingClientRect();
+  const dx = safeOrigin.x - (rect.left + rect.width / 2);
+  const dy = safeOrigin.y - (rect.top + rect.height / 2);
+  const scale = clamp(Math.max(96 / rect.width, 64 / rect.height), 0.08, 0.5);
+
+  const anim = el.animate(
+    [
+      { opacity: 0, transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${scale})`, filter: 'blur(10px)' },
+      { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', filter: 'blur(0px)' },
+    ],
+    { duration: MAGIC_OPEN_DUR, easing: EASE_OUT, fill: 'both' },
+  );
+
+  return {
+    cancel() {
+      anim.cancel();
+    },
+  };
+}
+
+/** Genie 关闭:截图后逐行收缩到触发点(快照到手立即隐藏本体,避免收缩画面下方漏出完整弹窗) */
+function runGenieClose(el: HTMLElement, origin: Point) {
   let rafId: number | null = null;
   let cancelled = false;
   let snapshotCanvas: HTMLCanvasElement | null = null;
@@ -212,20 +230,24 @@ function runMagicMotion(el: HTMLElement, origin: Point, duration: number, direct
   }
 
   function frame(now: number) {
-    if (cancelled) return;
-    if (!snapshotCanvas) return;
+    if (cancelled || !snapshotCanvas) return;
 
     // 在每一帧重新获取 rect，确保使用最新的位置尺寸
     const rect = el.getBoundingClientRect();
+    // 元素已被卸载(timer 先于截图完成触发)时终止绘制,避免画面定格在收缩一半的状态
+    if (rect.width === 0 || rect.height === 0) {
+      cleanup();
+      return;
+    }
 
-    const t = clamp01((now - start) / duration);
+    const t = clamp01((now - start) / MAGIC_CLOSE_DUR);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       cleanup();
       return;
     }
 
-    renderGenieFrame(ctx, snapshotCanvas, width, height, t, direction, safeOrigin, rect);
+    renderGenieFrame(ctx, snapshotCanvas, width, height, t, 'close', safeOrigin, rect);
 
     if (t < 1) {
       rafId = requestAnimationFrame(frame);
@@ -239,11 +261,14 @@ function runMagicMotion(el: HTMLElement, origin: Point, duration: number, direct
   requestAnimationFrame(() => {
     if (cancelled) return;
 
+    // 快照前恢复可见,防止快速开关场景下 inline opacity=0 导致拍到透明图
+    el.style.opacity = '';
+
     toCanvas(el, { pixelRatio: 1, cacheBust: false }).then((snapshot) => {
       if (cancelled) return;
 
       snapshotCanvas = snapshot;
-      el.style.opacity = direction === 'open' ? '0' : '1';
+      el.style.opacity = '0';
       start = performance.now();
       rafId = requestAnimationFrame(frame);
     }).catch(() => {
@@ -260,22 +285,6 @@ function runMagicMotion(el: HTMLElement, origin: Point, duration: number, direct
   };
 }
 
-/**
- * macOS Genie 打开动画
- * 从点击位置的小压缩状态 → 展开到屏幕中央
- */
-function runMagicOpen(el: HTMLElement, origin: Point) {
-  return runMagicMotion(el, origin, MAGIC_OPEN_DUR, 'open');
-}
-
-/**
- * macOS Genie 关闭动画
- * 从屏幕中央的完整窗口 → 压缩收缩到点击锚点
- */
-function runMagicClose(el: HTMLElement, origin: Point) {
-  return runMagicMotion(el, origin, MAGIC_CLOSE_DUR, 'close');
-}
-
 function getAnimKeyframes(anim: DialogAnimation) {
   switch (anim) {
     case 'default': return { in: [], out: [] };
@@ -284,11 +293,13 @@ function getAnimKeyframes(anim: DialogAnimation) {
   }
 }
 
-const OPEN_DUR = 380;
+const OPEN_DUR = 340;
 const CLOSE_DUR = 220;
-const MAGIC_OPEN_DUR = 420;
+const MAGIC_OPEN_DUR = 360;
 const MAGIC_CLOSE_DUR = 280;
 const EASE_OUT = 'cubic-bezier(0.16, 1, 0.3, 1)';
+/** 带轻微过冲的出场曲线,单段连续,替代手工多帧 spring */
+const EASE_OUT_BACK = 'cubic-bezier(0.34, 1.45, 0.64, 1)';
 const EASE_IN = 'ease-in';
 
 /** 全局最近点击位置（SSR 安全初始化） */
@@ -342,7 +353,6 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const animRef = React.useRef<Animation | null>(null);
   const magicMotionRef = React.useRef<{ cancel: () => void } | null>(null);
-  const openRafRef = React.useRef<number | null>(null);
   const closingRef = React.useRef(false);
   const closeNotifyTimerRef = React.useRef<number | null>(null);
   const magicCloseTimerRef = React.useRef<number | null>(null);
@@ -371,12 +381,6 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
     }
   }, []);
 
-  const clearOpenRaf = React.useCallback(() => {
-    if (openRafRef.current === null) return;
-    cancelAnimationFrame(openRafRef.current);
-    openRafRef.current = null;
-  }, []);
-
   const clearMagicMotion = React.useCallback(() => {
     magicMotionRef.current?.cancel();
     magicMotionRef.current = null;
@@ -384,9 +388,11 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
 
   /** 播放关闭动画后隐藏 */
   const handleClose = React.useCallback(() => {
+    // 幂等守卫:关闭动画进行中重复触发(ESC/点遮罩)不再重启动画
+    if (closingRef.current) return;
+
     const el = contentRef.current;
     clearCloseNotifyTimer();
-    clearOpenRaf();
     clearMagicTimers();
     clearMagicMotion();
     if (!el) { setPresentOpen(false); return; }
@@ -394,9 +400,9 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
     animRef.current?.cancel();
 
     if (dialogAnimation === 'magic') {
-      magicMotionRef.current = runMagicClose(el, magicOriginRef.current);
+      magicMotionRef.current = runGenieClose(el, magicOriginRef.current);
       magicCloseTimerRef.current = window.setTimeout(() => {
-        magicCloseTimerRef.current = null as any;
+        magicCloseTimerRef.current = null;
         setPresentOpen(false);
         closingRef.current = false;
         magicMotionRef.current = null;
@@ -424,17 +430,16 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
       animRef.current = null;
       closingRef.current = false;
     };
-  }, [clearCloseNotifyTimer, clearOpenRaf, clearMagicMotion, dialogAnimation]);
+  }, [clearCloseNotifyTimer, clearMagicMotion, clearMagicTimers, dialogAnimation]);
 
   React.useEffect(() => () => {
     clearCloseNotifyTimer();
-    clearOpenRaf();
     clearMagicTimers();
     clearMagicMotion();
     animRef.current?.cancel();
     animRef.current = null;
     closingRef.current = false;
-  }, [clearCloseNotifyTimer, clearMagicMotion, clearMagicTimers, clearOpenRaf]);
+  }, [clearCloseNotifyTimer, clearMagicMotion, clearMagicTimers]);
 
   /** 监听 open 变化 */
   React.useEffect(() => {
@@ -446,7 +451,6 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
     if (targetOpen && !prevOpenRef.current) {
       // 打开
       clearCloseNotifyTimer();
-      clearOpenRaf();
       clearMagicTimers();
       clearMagicMotion();
       magicOriginRef.current = getPointOnViewport(consumeOrigin());
@@ -462,52 +466,61 @@ function Dialog({ children, ...props }: DialogPrimitive.DialogProps) {
     prevOpenRef.current = !!targetOpen;
   }, [clearCloseNotifyTimer, targetOpen, isCustom, handleClose]);
 
-  /** 打开后播放动画 */
-  React.useEffect(() => {
+  /** 打开后播放动画:useLayoutEffect 在 paint 前同步启动,WAAPI 首帧即接管,无闪现也无不可见窗口 */
+  React.useLayoutEffect(() => {
     if (!isCustom || !presentOpen) return;
+
     const el = contentRef.current;
+    // ref 未挂载(异常场景)时无法播动画,元素保持自然可见,不会黑屏
     if (!el) return;
+    if (closingRef.current) return;
 
-    const id = requestAnimationFrame(() => {
-      openRafRef.current = null;
-      if (closingRef.current) return;
-      animRef.current?.cancel();
-      if (dialogAnimation === 'magic') {
+    animRef.current?.cancel();
+
+    /** 超时兜底:无论 onfinish/oncancel 是否触发,到期后强制清理保证元素可见 */
+    const scheduleFallback = (duration: number) => {
+      clearMagicTimers();
+      magicOpenTimerRef.current = window.setTimeout(() => {
+        magicOpenTimerRef.current = null;
+        clearMagicInlineStyles(el);
+        magicMotionRef.current?.cancel();
+        magicMotionRef.current = null;
+      }, duration + 120);
+    };
+
+    if (dialogAnimation === 'magic') {
+      clearMagicMotion();
+      magicMotionRef.current = runMagicOpen(el, magicOriginRef.current);
+      scheduleFallback(MAGIC_OPEN_DUR);
+
+      return () => {
+        clearMagicTimers();
         clearMagicMotion();
-        magicMotionRef.current = runMagicOpen(el, magicOriginRef.current);
-        magicOpenTimerRef.current = window.setTimeout(() => {
-          magicOpenTimerRef.current = null as any;
-          clearMagicInlineStyles(el);
-          magicMotionRef.current = null;
-        }, MAGIC_OPEN_DUR);
-        return;
-      }
-
-      const kfs = getAnimKeyframes(dialogAnimation);
-      if (!kfs.in.length || typeof el.animate !== 'function') {
-        clearMagicInlineStyles(el);
-        return;
-      }
-
-      el.style.opacity = '0';
-
-      animRef.current = el.animate(kfs.in, { duration: OPEN_DUR, easing: EASE_OUT, fill: 'forwards' });
-      animRef.current.onfinish = () => {
-        clearMagicInlineStyles(el);
-        animRef.current = null;
       };
-      animRef.current.oncancel = () => {
-        clearMagicInlineStyles(el);
-        animRef.current = null;
-      };
-    });
-    openRafRef.current = id;
+    }
+
+    const kfs = getAnimKeyframes(dialogAnimation);
+    if (!kfs.in.length || typeof el.animate !== 'function') {
+      clearMagicInlineStyles(el);
+
+      return;
+    }
+
+    animRef.current = el.animate(kfs.in, { duration: OPEN_DUR, easing: EASE_OUT_BACK, fill: 'forwards' });
+    animRef.current.onfinish = () => {
+      clearMagicInlineStyles(el);
+      animRef.current = null;
+    };
+    animRef.current.oncancel = () => {
+      clearMagicInlineStyles(el);
+      animRef.current = null;
+    };
+    scheduleFallback(OPEN_DUR);
+
     return () => {
-      clearOpenRaf();
-      // 清理可能残留的 magic 打开 timer,避免快速连续开关时旧 timer 还在 setTimeout 队列里
       clearMagicTimers();
     };
-  }, [presentOpen, isCustom, dialogAnimation, clearMagicTimers]);
+  }, [presentOpen, isCustom, dialogAnimation, clearMagicMotion, clearMagicTimers]);
 
   const ctx = React.useMemo(() => ({ contentRef, animRef }), []);
 
@@ -547,18 +560,27 @@ const DialogPortal = DialogPrimitive.Portal;
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    className={cn(
-      'data-[state=open]:animate-in data-[state=closed]:animate-out fixed inset-0 z-50 bg-black/50 backdrop-blur-sm',
-      'data-[state=closed]:duration-200 data-[state=open]:duration-300',
-      'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-      className,
-    )}
-    ref={ref}
-    {...props}
-  />
-));
+>(({ className, style, ...props }, ref) => {
+  const dialogAnimation = useSettingsStore((s) => s.dialogAnimation);
+  // 自定义动画时遮罩时长与内容动画对齐,避免弹窗已收走而遮罩残留或提前消失
+  const overlayDuration = dialogAnimation === 'magic'
+    ? MAGIC_CLOSE_DUR
+    : dialogAnimation === 'default' ? undefined : CLOSE_DUR;
+
+  return (
+    <DialogPrimitive.Overlay
+      className={cn(
+        'data-[state=open]:animate-in data-[state=closed]:animate-out fixed inset-0 z-50 bg-black/50 backdrop-blur-sm',
+        'data-[state=closed]:duration-200 data-[state=open]:duration-300',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        className,
+      )}
+      style={overlayDuration ? { animationDuration: `${overlayDuration}ms`, ...style } : style}
+      ref={ref}
+      {...props}
+    />
+  );
+});
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const DialogContent = React.forwardRef<
@@ -597,7 +619,7 @@ const DialogContent = React.forwardRef<
       >
         {children}
         <DialogPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute right-4 top-4 rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none hover:bg-muted/50 p-1">
-          <X className="" />
+          <X />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>

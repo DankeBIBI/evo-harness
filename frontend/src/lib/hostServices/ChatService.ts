@@ -11,6 +11,7 @@ import { streamChat } from "@/lib/chat/stream";
 import { createProvider } from "@/lib/chat/providers/base";
 import type { NativeToolCall } from "@/lib/chat/protocol";
 import { useModelStore } from "@/stores/modelStore";
+import { estimateTurnCostCny } from "@/lib/cache/cost";
 
 /** 取消请求标记(按 agentId+convId) */
 const cancelFlags = new Map<string, boolean>();
@@ -96,18 +97,41 @@ export async function StreamChat(req: StreamChatRequestLike): Promise<void> {
 	}
 
 	const provider = createProvider(model.provider);
+	let lastUsageFingerprint = "";
 
 	try {
 		await streamChat(provider, model, req, {
 			isCancelled: () => cancelFlags.get(cancelKey) === true,
 			onContent: (text) => emitContent(eventName, text),
+			onAssistantMetadata: (metadata) => {
+				EventsEmit(eventName, { type: "assistant_metadata", ...metadata });
+			},
 			onToolCall: (call) => emitToolCall(eventName, call),
 			onUsage: (usage) => {
+				const fingerprint = [
+					usage.input ?? 0,
+					usage.output ?? 0,
+					usage.cacheRead,
+					usage.cacheCreation,
+					usage.total ?? 0,
+				].join(":");
+				if (fingerprint === lastUsageFingerprint) return;
+				lastUsageFingerprint = fingerprint;
+				const costCny = estimateTurnCostCny(
+					model.name,
+					usage.input ?? 0,
+					usage.output ?? 0,
+					usage.cacheRead,
+					usage.cacheCreation,
+				);
 				EventsEmit(eventName, {
 					type: "cache_usage",
 					cacheRead: usage.cacheRead,
 					cacheCreation: usage.cacheCreation,
-					costCny: usage.costCny,
+					inputTokens: usage.input,
+					outputTokens: usage.output,
+					totalTokens: usage.total,
+					costCny,
 				});
 			},
 			onDone: () => {
@@ -121,9 +145,14 @@ export async function StreamChat(req: StreamChatRequestLike): Promise<void> {
 			return;
 		}
 		// 采集前缀形状(供缓存诊断),与上轮对比,变化时随 done 事件带出
-		const shape = await captureShape(req.role ?? "", req.toolsSchema ?? [], 0);
-		const prevShape = shapeStore.get(eventName);
-		shapeStore.set(eventName, shape);
+		const shape = await captureShape(
+			req.systemStatic ?? req.role ?? "",
+			req.toolsSchema ?? [],
+			0,
+		);
+		const shapeKey = `${req.convId ?? req.agentId}::${model.id ?? model.name}::${provider.name}`;
+		const prevShape = shapeStore.get(shapeKey);
+		shapeStore.set(shapeKey, shape);
 		if (prevShape && prevShape.prefixHash !== shape.prefixHash) {
 			EventsEmit(eventName, { prefixChanged: true, type: "cache_usage" });
 		}

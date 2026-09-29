@@ -1,14 +1,15 @@
 import { cn } from '@/lib/utils';
 import { File, FileSearch, FolderTree, PanelRightClose, PanelRightOpen, Search } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { FilePreview } from '@/components/file/FilePreview';
 import { ProjectSelector } from '@/components/file/ProjectSelector';
 import { useLayoutStore } from '@/stores/layoutStore';
+import { useFileReviewStore } from '@/stores/fileReviewStore';
 
 import type { FileChange } from '@/components/editor/CodeReviewPanel';
-import { FileChangesBar } from '@/components/chat/panels/FileChangesBar';
+import { CodeReviewPanel } from '@/components/editor/CodeReviewPanel';
 
 type SidebarTab = 'changes' | 'files';
 
@@ -73,12 +74,74 @@ export function FileTreeSidebar({
   const [tab, setTab] = useState<SidebarTab>('changes');
   /** 当前预览中的文件路径(无则下半显示空状态) */
   const [previewPath, setPreviewPath] = useState<null | string>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [treeRatio, setTreeRatio] = useState(58);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const splitDragRef = useRef(false);
   const collapsed = useLayoutStore((s) => s.rightCollapsed);
   const toggleCollapsed = useLayoutStore((s) => s.toggleRightCollapsed);
+  // 2026-08-31: 直接订阅 fileReviewStore,右栏"变更"tab 渲染 CodeReviewPanel
+  const reviewChanges = useFileReviewStore((s) => s.changes);
+  const setReviewChanges = useFileReviewStore((s) => s.setChanges);
+  /** 接受变更 —— 写盘 + 更新 status */
+  const handleAcceptChange = useCallback(
+    async (change: FileChange) => {
+      try {
+        const { WriteFile } = await import('@/lib/hostServices/FileService');
+        await WriteFile(change.filePath, change.newContent);
+        setReviewChanges((prev) =>
+          prev.map((c) =>
+            c.id === change.id ? { ...c, status: 'accepted' as const } : c,
+          ),
+        );
+        // TODO: 走 store + 统一 toast(目前 ChatWindow 通过 addChatFeedback 显示)
+        // 此处先打 devLog,等 store toast 接入后改走 store
+        const { devLog } = await import('@/lib/devLog');
+        devLog.i('file-review', `已接受: ${change.filePath}`);
+      } catch (error) {
+        const { devLog } = await import('@/lib/devLog');
+        devLog.e('file-review', `保存失败: ${String(error)}`);
+      }
+    },
+    [setReviewChanges],
+  );
+  /** 拒绝变更 —— 写回 originalContent + 更新 status */
+  const handleRejectChange = useCallback(
+    async (change: FileChange) => {
+      try {
+        const { WriteFile } = await import('@/lib/hostServices/FileService');
+        await WriteFile(change.filePath, change.originalContent);
+        setReviewChanges((prev) =>
+          prev.map((c) =>
+            c.id === change.id ? { ...c, status: 'rejected' as const } : c,
+          ),
+        );
+      } catch {
+        const { devLog } = await import('@/lib/devLog');
+        devLog.e('file-review', `回滚失败: ${change.filePath}`);
+      }
+    },
+    [setReviewChanges],
+  );
 	useAutoSwitchToFilesTab(projectPath, setTab);
 
 	// (2026-08-18) 变更 tab 角标数
-	const changeCount = changes?.length ?? 0;
+	const changeCount = reviewChanges.length;
+
+  const handleSplitPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    splitDragRef.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+  const handleSplitPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!splitDragRef.current || !splitContainerRef.current) return;
+    const rect = splitContainerRef.current.getBoundingClientRect();
+    const next = ((event.clientY - rect.top) / rect.height) * 100;
+    setTreeRatio(Math.max(25, Math.min(78, next)));
+  }, []);
+  const stopSplitDrag = useCallback(() => {
+    splitDragRef.current = false;
+  }, []);
 
 	return (
 		<aside
@@ -98,12 +161,18 @@ export function FileTreeSidebar({
 					badge={changeCount > 0 ? changeCount : undefined}
 					icon={FileSearch}
 					label="变更"
-					onClick={toggleCollapsed}
+          onClick={() => {
+            setTab('changes');
+            toggleCollapsed();
+          }}
 				/>
 				<RightIconBarButton
 					icon={FolderTree}
 					label="文件"
-					onClick={toggleCollapsed}
+          onClick={() => {
+            setTab('files');
+            toggleCollapsed();
+          }}
 				/>
 				<div className="mt-auto flex w-full flex-col items-center gap-1">
 					<div className="bg-border/60 h-px w-6" />
@@ -124,21 +193,26 @@ export function FileTreeSidebar({
       <div className="flex h-10 shrink-0 items-center gap-3 px-3">
         <button
           className={cn(
-            'text-xs transition-colors duration-150',
+            'relative flex h-full items-center gap-1 text-xs transition-colors duration-150 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:transition-colors',
             tab === 'changes'
-              ? 'text-foreground font-medium'
+              ? 'text-foreground font-medium after:bg-primary'
               : 'text-muted-foreground hover:text-foreground',
           )}
           onClick={() => setTab('changes')}
           type="button"
         >
           变更
+      {changeCount > 0 && (
+      <span className="bg-muted text-muted-foreground rounded-full px-1.5 text-[10px] tabular-nums">
+        {changeCount > 99 ? '99+' : changeCount}
+      </span>
+      )}
         </button>
         <button
           className={cn(
-            'text-xs transition-colors duration-150',
+			'relative flex h-full items-center text-xs transition-colors duration-150 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:transition-colors',
             tab === 'files'
-              ? 'text-foreground font-medium'
+			  ? 'text-foreground font-medium after:bg-primary'
               : 'text-muted-foreground hover:text-foreground',
           )}
           onClick={() => setTab('files')}
@@ -149,8 +223,16 @@ export function FileTreeSidebar({
         <div className="ml-auto flex items-center gap-0.5">
           <Button
             aria-label="搜索"
-            className="text-muted-foreground hover:text-foreground h-6 w-6"
+      className={cn(
+        'text-muted-foreground hover:text-foreground h-6 w-6',
+        searchOpen && tab === 'files' && 'bg-accent text-accent-foreground',
+      )}
+      onClick={() => {
+        setTab('files');
+        setSearchOpen((value) => !value);
+      }}
             size="icon"
+      title="搜索项目文件"
             variant="ghost"
           >
             <Search className="h-[14px] w-[14px]" />
@@ -170,9 +252,11 @@ export function FileTreeSidebar({
 
       <div className="flex min-h-0 flex-1 flex-col">
         {tab === 'files' ? (
-          <>
+		  <div className="flex min-h-0 flex-1 flex-col" ref={splitContainerRef}>
             {/* 上半:文件树(有预览时压缩到 50%, 无预览时占满) */}
-            <div className={cn('min-h-0 overflow-hidden', previewPath ? 'h-1/2' : 'h-full')}>
+			<div
+			  className="min-h-0 overflow-hidden"
+			  style={{ height: previewPath ? `${treeRatio}%` : '100%' }}>
               <ProjectSelector
                 onFileSelect={(path, content) => {
                   // 单击 = 预览(不弹回填, 避免误触)
@@ -180,41 +264,47 @@ export function FileTreeSidebar({
                   void content; // 暂时不读 content, 预览走 FilePreview 自己读
                 }}
                 onProjectChange={(path) => onProjectPathChange?.(path)}
+        onFileInsert={(path, content) => onFileContentToInput?.(path, content)}
+        onSearchOpenChange={setSearchOpen}
                 projectPath={projectPath}
+        searchOpen={searchOpen}
+        selectedPath={previewPath}
               />
             </div>
 
             {/* 下半:预览(只在有 previewPath 时渲染) */}
             {previewPath && (
-              <div className="min-h-0 flex-1 p-2 pt-0">
+        <>
+        <div
+          aria-label="调整文件树和预览高度"
+          className="group flex h-2 shrink-0 touch-none cursor-row-resize items-center px-2"
+          onDoubleClick={() => setTreeRatio(58)}
+          onPointerCancel={stopSplitDrag}
+          onPointerDown={handleSplitPointerDown}
+          onPointerMove={handleSplitPointerMove}
+          onPointerUp={stopSplitDrag}
+          role="separator"
+          title="拖动调整预览高度 · 双击恢复">
+          <div className="bg-border group-hover:bg-primary/60 h-px w-full transition-colors" />
+        </div>
+        <div className="min-h-0 flex-1 px-2 pb-2">
                 <FilePreview
                   filePath={previewPath}
+          onInsert={(path) => onFileContentToInput?.(path, '')}
                   onClose={() => setPreviewPath(null)}
                 />
-              </div>
+        </div>
+        </>
             )}
-          </>
+      </div>
         ) : (
-          /* "变更" tab: 展示 FileChangesBar(由 ChatWindow 注入 props) */
-          <div className="min-h-0 flex-1 overflow-auto p-2">
-            {changes && changes.length > 0 ? (
-              <FileChangesBar
-                changes={changes}
-                expanded={expanded ?? false}
-                onDiscard={onDiscard}
-                onDiscardAll={onDiscardAll}
-                onExpandedChange={onExpandedChange}
-                onKeep={onKeep}
-                onKeepAll={onKeepAll}
-                onOpenDiff={onOpenDiff}
-              />
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  暂无文件变更。AI 修改文件后, 变更会出现在这里。
-                </p>
-              </div>
-            )}
+          /* "变更" tab: 2026-08-31 改用 CodeReviewPanel(完整 diff 视图, 接 store) */
+          <div className="min-h-0 flex-1">
+            <CodeReviewPanel
+              changes={reviewChanges}
+              onAcceptChange={handleAcceptChange}
+              onRejectChange={handleRejectChange}
+            />
           </div>
         )}
       </div>

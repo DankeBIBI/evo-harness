@@ -5,15 +5,15 @@ import { useCallback } from 'react';
 import { buildHistoryMessages } from '../lib/chatHistory';
 import type { HistoryMessageInput } from '../lib/chatHistory';
 import type { ChatMessage } from '@/lib/chat/protocol';
-import {
-  getRegisteredTools,
-  toolNameAliases,
-} from '@/lib/tools/registry';
 
 export interface FileMentionReference {
   path: string;
   token: string;
 }
+
+const MAX_CONTEXT_FILES = 20;
+const MAX_CONTEXT_FILE_CHARS = 12_000;
+const MAX_TOTAL_FILE_CONTEXT_CHARS = 48_000;
 
 export function useChatWorkspace() {
   const formatError = (error: unknown) =>
@@ -37,30 +37,6 @@ export function useChatWorkspace() {
     [],
   );
 
-  /** 构建工具列表文本 */
-  const buildToolAliasesText = useCallback(() => {
-    const registered = getRegisteredTools();
-    const lines: string[] = [];
-
-    // 已注册工具
-    lines.push('--- 已注册工具 ---');
-    for (const tool of registered) {
-      lines.push(`  ${tool.name} - ${tool.description}`);
-    }
-
-    // 别名（短名）映射
-    const aliasEntries = Object.entries(toolNameAliases);
-    if (aliasEntries.length > 0) {
-      lines.push('');
-      lines.push('--- 短名别名（兼容） ---');
-      for (const [alias, real] of aliasEntries) {
-        lines.push(`  ${alias} -> ${real}`);
-      }
-    }
-
-    return lines.join('\n');
-  }, []);
-
   const buildWorkspaceMessage = useCallback(
     async (
       userInput: string,
@@ -69,6 +45,7 @@ export function useChatWorkspace() {
       fileMentions: FileMentionReference[] = [],
       matchedPrompts?: Prompt[],
       conversationHistory?: HistoryMessageInput[],
+      modelOptions?: { maxInputTokens?: number; preserveReasoning?: boolean },
     ): Promise<{
       systemContext: string;
       userMessage: string;
@@ -100,17 +77,30 @@ export function useChatWorkspace() {
           return '';
         })
         .filter(Boolean);
-      const orderedFileRefs = fileRefs.slice(0, 5);
+      // 当前轮引用优先；再从历史用户消息中恢复最近引用过的文件。
+      // 这些路径已随 Message 持久化，刷新/重启后仍能恢复上下文交接。
+      const historicalFileRefs = (conversationHistory ?? [])
+        .flatMap((message) => message.referencedFiles ?? [])
+        .reverse();
+      const orderedFileRefs = [...new Set([...fileRefs, ...historicalFileRefs])]
+        .filter(Boolean)
+        .slice(0, MAX_CONTEXT_FILES);
       const fileContext: string[] = [];
+	  let totalFileContextChars = 0;
 
       if (orderedFileRefs.length > 0) {
         const { ReadFile } = await import('@/lib/hostServices/FileService');
         for (const filePath of orderedFileRefs) {
+		  if (totalFileContextChars >= MAX_TOTAL_FILE_CONTEXT_CHARS) break;
           try {
             const content = await ReadFile(filePath);
+			const remaining = MAX_TOTAL_FILE_CONTEXT_CHARS - totalFileContextChars;
+			const limit = Math.min(MAX_CONTEXT_FILE_CHARS, remaining);
+			const excerpt = content.slice(0, limit);
             fileContext.push(
-              `### ${filePath}\n\`\`\`\n${content.slice(0, 12_000)}${content.length > 12_000 ? '\n...[truncated]' : ''}\n\`\`\``,
+			  `### ${filePath}\n\`\`\`\n${excerpt}${content.length > limit ? '\n...[truncated]' : ''}\n\`\`\``,
             );
+			totalFileContextChars += excerpt.length;
           } catch (error) {
             fileContext.push(
               `### ${filePath}\n读取失败: ${formatError(error)}`,
@@ -137,9 +127,12 @@ export function useChatWorkspace() {
       // 对话历史：只取 user/assistant、滑动窗口截断、stripForAI 摘要去标签
       // 2026-08-19 重构:历史轮次走结构化 messages 数组(history 字段),
       //   不再拼字符串进 user message — 对齐 OpenAI/Anthropic 官方协议
-      const { messages: historyChatMessages } = buildHistoryMessages(
-        conversationHistory,
-      );
+      const maxInputTokens = modelOptions?.maxInputTokens ?? 128_000;
+      const historyBudget = Math.max(12_000, Math.min(500_000, Math.floor(maxInputTokens * 0.5)));
+      const { messages: historyChatMessages } = buildHistoryMessages(conversationHistory, {
+        maxHistoryTokens: historyBudget,
+        preserveReasoning: modelOptions?.preserveReasoning,
+      });
 
       // 全部为空时直接返回 user input,空 system 段
       const hasSystemContent =
@@ -163,7 +156,10 @@ export function useChatWorkspace() {
         projectPath ? `项目根目录: ${projectPath}` : '项目根目录: 未选择',
         currentFilePath ? `当前文件: ${currentFilePath}` : '',
         '',
-        '1. **不要重复读取同一个文件。** 对话历史中已读过的文件直接在上下文中,不要再 ReadFile。',
+    orderedFileRefs.length > 0
+      ? `历史及本轮引用文件: ${orderedFileRefs.join(', ')}`
+      : '',
+    '1. **不要重复读取同一个文件。** 下方已引用文件及历史操作摘要中的已读文件直接使用现有上下文,仅当内容缺失或可能已变化时再 ReadFile。',
         '2. **修改完成后一句话总结。** "已将 XXX 改成 YYY" 即可。',
         '',
         fileContext.length > 0
@@ -182,13 +178,12 @@ export function useChatWorkspace() {
 
       return { systemContext, userMessage, userInputOnly, historyMessages: historyChatMessages };
     },
-    [getWorkspacePath, buildToolAliasesText],
+    [getWorkspacePath],
   );
 
   return {
     buildWorkspaceMessage,
     formatError,
     getWorkspacePath,
-    buildToolAliasesText,
   };
 }

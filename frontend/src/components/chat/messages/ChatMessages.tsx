@@ -226,9 +226,13 @@ export function ChatMessages({
         </div>
       )}
 
-      {messages
-        .filter((msg) => msg.id !== streamingId)
-        .map((msg) => (
+      {messages.map((msg) => {
+        // R1 (2026-09-06): 流式消息保持挂载,不再 filter 排除 + 独立气泡
+        // 流式期间用 streamingContent 覆盖显示,结束时切回 msg.content(stopStreaming 已写回),
+        // 组件不卸载 → 折叠态(think/output/file/工具详情)不丢失
+        const isStreaming = msg.id === streamingId;
+        const displayContent = isStreaming ? streamingContent : msg.content;
+        return (
           <div
             className={`mb-4 flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
             key={msg.id}
@@ -273,15 +277,18 @@ export function ChatMessages({
                   }
                 >
                   <StreamingMessage
-                    content={msg.content}
-                    isStreaming={false}
+                    content={displayContent}
+                    isStreaming={isStreaming}
                     toolCalls={msg.toolCalls}
                   />
-                  {/* 检测代码修改标记 */}
-                  <CodeModifyButtons
-                    content={msg.content}
-                    onCodeChangeClick={onCodeChangeClick}
-                  />
+                  {/* 检测代码修改标记 — 流式期间隐藏,避免 msg.content 每 500 字符 flush 时
+                  含不完整 @@FILE: 块导致按钮点击报"未找到可修改代码块" */}
+                  {!isStreaming && (
+                    <CodeModifyButtons
+                      content={msg.content}
+                      onCodeChangeClick={onCodeChangeClick}
+                    />
+                  )}
                   {/* 消息级渲染：仅展示属于本条 msg 的子 Agent 执行记录（per-message 隔离） */}
                   {(() => {
                     const mine = (agentExecutions ?? []).filter(
@@ -348,47 +355,8 @@ export function ChatMessages({
               </div>
             </div>
           </div>
-        ))}
-
-      {/* 流式消息 */}
-      {streamingId && (
-        <div className="mb-4 flex flex-row gap-3">
-          <div
-            className={`mt-1 flex h-[36px] w-[36px] flex-shrink-0 items-center justify-center rounded-full ${
-              immersiveChatMode ? "bg-transparent" : "bg-muted shadow-soft"
-            }`}
-          >
-            <Bot
-              className={
-                immersiveChatMode
-                  ? "text-muted-foreground/40 h-[20px] w-[20px]"
-                  : "text-muted-foreground h-[20px] w-[20px]"
-              }
-            />
-          </div>
-          <div
-            className={
-              immersiveChatMode
-                ? "min-w-0 overflow-hidden px-1 py-1"
-                : "bg-card shadow-soft min-w-0 overflow-hidden rounded-2xl rounded-tl-sm px-5 py-4"
-            }
-          >
-            {/* 派生 isStreaming：流式时显示"执行中"，结束时切"完成"（之前硬编码 true 导致 UI 永远卡在执行中） */}
-            {(() => {
-              // 2026-07-06 P1-2: 从会话 store 查流式消息的 toolCalls,渲染活动日志
-              // 流式消息在会话中存在(useChatStreaming addMessage 创建),只是被下面 filter 排除
-              const streamingMsg = messages.find((m) => m.id === streamingId);
-              return (
-                <StreamingMessage
-                  content={streamingContent}
-                  isStreaming={!!streamingId}
-                  toolCalls={streamingMsg?.toolCalls}
-                />
-              );
-            })()}
-          </div>
-        </div>
-      )}
+        );
+      })}
 
       {/* 排队消息幽灵气泡 */}
       {messageQueue &&

@@ -2,7 +2,6 @@
  * 缓存前缀形状快照(lib/cache/prefixShape)
  * - 作用: 每轮开始前对 "system prompt + tools schema" 取哈希,turn 结束后与上轮对比
  * - 哈希变化则标记前缀失效,提示缓存重建
- * - 与 Go services/cache/prefix_shape.go 1:1 迁移
  */
 
 /** 工具 schema 摘要(参与 toolsHash 计算) */
@@ -52,11 +51,10 @@ async function hashString(s: string): Promise<string> {
     .join('');
 }
 
-/** 规范化工具 schema 列表后取哈希(先按 name 排序保证内容一致则哈希一致) */
+/** 按实际发送顺序对工具 schema 取哈希；顺序变化也会使服务端前缀缓存失效。 */
 async function hashToolSchemas(schemas: ToolSchemaLike[]): Promise<string> {
   if (schemas.length === 0) return '';
-  const sorted = [...schemas].sort((a, b) => a.name.localeCompare(b.name));
-  const combined = sorted
+  const combined = schemas
     .map((s) => JSON.stringify({ description: s.description, name: s.name, parameters: s.parameters }))
     .join('\x00');
   return hashString(combined);

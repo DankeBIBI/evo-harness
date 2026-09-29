@@ -6,6 +6,7 @@
 
 import type { ChatMessage } from "../protocol";
 import type { ChatProvider, ProviderModel } from "./base";
+import { getModelCapabilities } from "./capabilities";
 
 /** OpenAI 兼容请求(extends 全局基座 + 自有历史消息) */
 export interface OpenAiChatRequestLike extends StreamChatRequestLike {
@@ -19,11 +20,20 @@ export function buildOpenAiBody(
 	model: ProviderModel,
 ): Record<string, unknown> {
 	const messages: Array<Record<string, unknown>> = [];
-	if (req.role) messages.push({ role: "system", content: req.role });
+	const capabilities = getModelCapabilities(model);
+	if (capabilities.promptCache === "passive" && req.systemStatic) {
+		messages.push({ role: "system", content: req.systemStatic });
+		if (req.systemContext) {
+			messages.push({ role: "system", content: req.systemContext });
+		}
+	} else if (req.role) {
+		messages.push({ role: "system", content: req.role });
+	}
 	// 历史轮次:按 OpenAI 协议顺序排在 system 之后、continuationMessages 之前
 	// 替代旧的"⚠️ 对话历史"字符串拼接
 	const pushAssistant = (m: {
 		content: string;
+		reasoningDetails?: Array<Record<string, unknown>>;
 		toolCalls?: Array<{
 			id: string;
 			input: Record<string, unknown>;
@@ -43,6 +53,9 @@ export function buildOpenAiBody(
 				id: tc.id,
 				type: "function",
 			}));
+		}
+		if (m.reasoningDetails?.length) {
+			item.reasoning_details = m.reasoningDetails;
 		}
 		messages.push(item);
 	};
@@ -66,7 +79,9 @@ export function buildOpenAiBody(
 		if (m.role === "assistant") pushAssistant(m);
 		else if (m.role === "tool") pushTool(m);
 	});
-	messages.push({ role: "user", content: req.message });
+	if (req.appendCurrentUser !== false) {
+		messages.push({ role: "user", content: req.message });
+	}
 
 	const tools = (req.toolsSchema ?? []).map((t) => ({
 		function: {
@@ -80,7 +95,13 @@ export function buildOpenAiBody(
 	return {
 		messages,
 		model: model.name,
+		...(capabilities.reasoningFormat === "minimax-reasoning-details"
+			? { reasoning_split: true }
+			: {}),
 		stream: true,
+		...(capabilities.supportsStreamUsage
+			? { stream_options: { include_usage: true } }
+			: {}),
 		tools: tools.length > 0 ? tools : undefined,
 	};
 }
@@ -113,6 +134,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
 		const choices = payload.choices as Array<{
 			delta?: {
 				content?: string;
+				reasoning_details?: Array<Record<string, unknown>>;
 				tool_calls?: Array<{
 					function?: { arguments?: string; name?: string };
 					id?: string;
@@ -122,11 +144,33 @@ export class OpenAICompatibleProvider implements ChatProvider {
 			finish_reason?: string;
 		}>;
 		const choice = choices?.[0];
+		const usage = payload.usage as
+			| {
+					completion_tokens?: number;
+					prompt_tokens?: number;
+					prompt_tokens_details?: { cached_tokens?: number };
+					total_tokens?: number;
+			  }
+			| undefined;
+		if (usage) {
+			const cacheRead = usage.prompt_tokens_details?.cached_tokens ?? 0;
+			cb.onUsage?.({
+				cacheCreation: 0,
+				cacheRead,
+				costCny: 0,
+				input: Math.max(0, (usage.prompt_tokens ?? 0) - cacheRead),
+				output: usage.completion_tokens ?? 0,
+				total: usage.total_tokens,
+			});
+		}
 		if (!choice) return;
 
 		const delta = choice.delta ?? {};
 		if (delta.content) {
 			cb.onContent(delta.content);
+		}
+		if (delta.reasoning_details?.length) {
+			cb.onAssistantMetadata?.({ reasoningDetails: delta.reasoning_details });
 		}
 		if (delta.tool_calls && delta.tool_calls.length > 0) {
 			// OpenAI 流式 tool_calls 按 index 分片累积,合并后整体回调

@@ -108,3 +108,8 @@ export async function loadSourceHandle(
     req.onerror = (): void => resolve(null);
   });
 }
+
+/** 查询来源是否已有当前会话或持久化的目录授权。 */
+export async function hasSourceHandle(source: string): Promise<boolean> {
+  return (await loadSourceHandle(source)) !== null;
+}

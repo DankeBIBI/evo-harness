@@ -6,6 +6,7 @@
 
 import type { ChatMessage } from "../protocol";
 import type { ChatProvider, ProviderModel } from "./base";
+import { getModelCapabilities } from "./capabilities";
 
 /** Anthropic 请求(extends 全局基座 + 自有历史消息) */
 export interface AnthropicChatRequestLike extends StreamChatRequestLike {
@@ -19,6 +20,7 @@ export function buildAnthropicBody(
 	model: ProviderModel,
 ): Record<string, unknown> {
 	const messages: Array<Record<string, unknown>> = [];
+	const capabilities = getModelCapabilities(model);
 	// Anthropic 协议要点:
 	//   - system 走顶级 system 字段,不在 messages 里
 	//   - tool_result 必须是 user message 的 content 数组项,不是独立 tool role
@@ -65,15 +67,31 @@ export function buildAnthropicBody(
 	};
 	const pushAssistant = (m: {
 		content: string;
+		providerContentBlocks?: Array<Record<string, unknown>>;
 		toolCalls?: Array<{
 			id: string;
 			input: Record<string, unknown>;
 			toolName: string;
 		}>;
 	}) => {
-		const blocks: Record<string, unknown>[] = [];
-		if (m.content) blocks.push({ text: m.content, type: "text" });
-		(m.toolCalls ?? []).forEach((tc) => {
+		const blocks: Record<string, unknown>[] = m.providerContentBlocks?.length
+			? m.providerContentBlocks.map((block) => ({ ...block }))
+			: [];
+		const toolCallsById = new Map((m.toolCalls ?? []).map((tc) => [tc.id, tc]));
+		const rawToolUseIds = new Set<string>();
+		for (const block of blocks) {
+			if (block.type !== "tool_use") continue;
+			const id = String(block.id ?? "");
+			if (id) rawToolUseIds.add(id);
+			const call = toolCallsById.get(id);
+			if (call) {
+				block.input = call.input;
+				block.name = call.toolName;
+			}
+		}
+		const hasRawText = blocks.some((block) => block.type === "text");
+		if (m.content && !hasRawText) blocks.push({ text: m.content, type: "text" });
+		(m.toolCalls ?? []).filter((tc) => !rawToolUseIds.has(tc.id)).forEach((tc) => {
 			blocks.push({
 				id: tc.id,
 				input: tc.input,
@@ -99,14 +117,69 @@ export function buildAnthropicBody(
 		if (m.role === "assistant") pushAssistant(m);
 		else if (m.role === "tool") appendToolResult(m);
 	});
-	// 当前 user 消息(纯用户输入),连续 user 时自动合并进上一条
-	pushUserText(req.message);
+	const historyMessageCount = messages.length;
+	// 当前 user 消息仅在初始请求追加；工具续传以 tool_result 作为末条 user 内容。
+	if (req.appendCurrentUser !== false) pushUserText(req.message);
 
 	const tools = (req.toolsSchema ?? []).map((t) => ({
 		description: t.description,
 		input_schema: t.parameters,
 		name: t.name,
 	}));
+	if (capabilities.promptCache === "anthropic-explicit" && tools.length > 0) {
+		Object.assign(tools[tools.length - 1], {
+			cache_control: { type: "ephemeral" },
+		});
+	}
+
+	/** 在历史尾部设置增量缓存断点；连同 tools/system 总数不超过 Anthropic 的 4 个。 */
+	if (capabilities.promptCache === "anthropic-explicit" && historyMessageCount > 0) {
+		const candidates = [historyMessageCount - 1];
+		// 超过约 20 个内容块时补一个较早断点，避免回溯窗口失效。
+		let blockCount = 0;
+		for (let i = historyMessageCount - 1; i >= 0; i--) {
+			const content = messages[i].content;
+			blockCount += Array.isArray(content) ? content.length : 1;
+			if (blockCount >= 18) {
+				candidates.unshift(i);
+				break;
+			}
+		}
+		for (const index of [...new Set(candidates)].slice(-2)) {
+			const message = messages[index];
+			if (Array.isArray(message.content)) {
+				const blocks = message.content as Record<string, unknown>[];
+				if (blocks.length > 0) {
+					blocks[blocks.length - 1] = {
+						...blocks[blocks.length - 1],
+						cache_control: { type: "ephemeral" },
+					};
+				}
+			} else if (typeof message.content === "string") {
+				message.content = [
+					{
+						cache_control: { type: "ephemeral" },
+						text: message.content,
+						type: "text",
+					},
+				];
+			}
+		}
+	}
+
+	const staticSystem = req.systemStatic ?? req.role ?? "";
+	const dynamicSystem = req.systemContext ?? "";
+	const systemBlocks: Array<Record<string, unknown>> = [];
+	if (staticSystem) {
+		systemBlocks.push({
+			...(capabilities.promptCache === "anthropic-explicit"
+				? { cache_control: { type: "ephemeral" } }
+				: {}),
+			text: staticSystem,
+			type: "text",
+		});
+	}
+	if (dynamicSystem) systemBlocks.push({ text: dynamicSystem, type: "text" });
 
 	return {
 		max_tokens: (req.modelConfig?.maxTokens as number) ?? 4096,
@@ -117,9 +190,7 @@ export function buildAnthropicBody(
 		model: model.name,
 		stream: true,
 		// 主动缓存:system 段标 cache_control ephemeral,命中率由 usage.cache_read_input_tokens 统计
-		system: req.role
-			? [{ cache_control: { type: "ephemeral" }, text: req.role, type: "text" }]
-			: undefined,
+		system: systemBlocks.length > 0 ? systemBlocks : undefined,
 		tools: tools.length > 0 ? tools : undefined,
 	};
 }
@@ -128,6 +199,7 @@ export function buildAnthropicBody(
 export class AnthropicProvider implements ChatProvider {
 	readonly name = "anthropic";
 	readonly isAnthropic = true;
+	private sawInitialUsage = false;
 
 	buildUrl(model: ProviderModel): string {
 		return `${model.baseUrl.replace(/\/+$/, "")}/v1/messages`;
@@ -168,6 +240,13 @@ export class AnthropicProvider implements ChatProvider {
 				name?: string;
 				type?: string;
 			};
+			if (block?.type) {
+				cb.onAssistantMetadata?.({
+					contentBlock: block as Record<string, unknown>,
+					contentBlockIndex: (payload.index as number) ?? 0,
+					phase: "start",
+				});
+			}
 			if (block?.type === "tool_use" && block.name) {
 				cb.onToolCall({
 					args: "",
@@ -183,8 +262,16 @@ export class AnthropicProvider implements ChatProvider {
 			const delta = payload.delta as {
 				partial_json?: string;
 				text?: string;
+				thinking?: string;
 				type?: string;
 			};
+			if (delta) {
+				cb.onAssistantMetadata?.({
+					contentBlock: delta as Record<string, unknown>,
+					contentBlockIndex: (payload.index as number) ?? 0,
+					phase: "delta",
+				});
+			}
 			if (delta?.text) {
 				cb.onContent(delta.text);
 			}
@@ -200,6 +287,10 @@ export class AnthropicProvider implements ChatProvider {
 			return;
 		}
 		if (event === "content_block_stop") {
+			cb.onAssistantMetadata?.({
+				contentBlockIndex: (payload.index as number) ?? 0,
+				phase: "stop",
+			});
 			cb.onToolCall({
 				args: "",
 				finished: true,
@@ -213,12 +304,20 @@ export class AnthropicProvider implements ChatProvider {
 			const usage = payload.usage as {
 				cache_creation_input_tokens?: number;
 				cache_read_input_tokens?: number;
+				input_tokens?: number;
+				output_tokens?: number;
 			};
 			if (usage) {
 				cb.onUsage?.({
-					cacheCreation: usage.cache_creation_input_tokens ?? 0,
-					cacheRead: usage.cache_read_input_tokens ?? 0,
+					cacheCreation: this.sawInitialUsage
+						? 0
+						: (usage.cache_creation_input_tokens ?? 0),
+					cacheRead: this.sawInitialUsage
+						? 0
+						: (usage.cache_read_input_tokens ?? 0),
 					costCny: 0,
+					input: usage.input_tokens,
+					output: usage.output_tokens,
 				});
 			}
 			return;
@@ -226,8 +325,15 @@ export class AnthropicProvider implements ChatProvider {
 		if (event === "message_start") {
 			const usage = (payload.message as { usage?: Record<string, number> })
 				?.usage;
-			if (usage?.input_tokens) {
-				cb.onUsage?.({ cacheCreation: 0, cacheRead: 0, costCny: 0 });
+			if (usage) {
+				this.sawInitialUsage = true;
+				cb.onUsage?.({
+					cacheCreation: usage.cache_creation_input_tokens ?? 0,
+					cacheRead: usage.cache_read_input_tokens ?? 0,
+					costCny: 0,
+					input: usage.input_tokens ?? 0,
+					output: usage.output_tokens ?? 0,
+				});
 			}
 			return;
 		}

@@ -7,7 +7,7 @@
  *  3) 构建"可用 Agent 摘要"注入 system prompt
  *  4) 统一任务入口（参考 AGENT-ROUTING.md §1.2）：
  *     - 用户未选 agent → 选 orchestration 类作为入口
- *     - 用户选了普通 agent 但 autoRoute / mode==='route' + 消息复杂 → 包装一层 orchestrator
+ *     - 用户选了普通 agent 但 mode==='route' + 消息复杂 → 包装一层 orchestrator
  *     - 用户选的就是 orchestration agent → 原样返回
  *  5) 把 parent agent 的 children 递归展开为后端 childAgents 数组
  *
@@ -17,7 +17,6 @@
 
 import { useCallback } from 'react';
 
-import { useSettingsStore } from '@/stores/settingsStore';
 import { useModeStore } from '@/stores/modeStore';
 
 /** 调用方可传入的 agent 形状（与 useChatStreaming 的 availableAgents / selectedAgent 对齐） */
@@ -190,7 +189,7 @@ export function buildChildAgents(
  *
  * 触发条件（任一）：
  *   1. 用户未手动选 agent（无 selectedAgent）→ 选 orchestration 类作为入口
- *   2. 用户选了普通 agent 但开启了 autoRoute 且消息复杂度高（长度>200 或多任务关键词）→ 包装一层 orchestrator
+ *   2. 用户选了普通 agent 但 mode==='route' 且消息复杂度高（长度>200 或多任务关键词）→ 包装一层 orchestrator
  *   3. 用户选的就是 orchestration agent → 原样返回
  *
  * 返回：{ entryAgent, extraChildren, routed }
@@ -203,8 +202,6 @@ export function useEntryAgentResolver(
 ): (message: string) => EntryAgentResolution {
   return useCallback(
     (message: string): EntryAgentResolution => {
-      const { autoRoute } = useSettingsStore.getState();
-
       // 1) 用户未选 agent：按 system scope 优先选 orchestration 类 agent 作为入口
       if (!selectedAgent?.id) {
         const systemOrchestrator = availableAgents.find(
@@ -239,12 +236,9 @@ export function useEntryAgentResolver(
         };
       }
 
-      // 3) 用户选了普通 agent：判断是否需要自动路由
-      //   - mode === 'route' 时强制走 orchestrator（覆盖 autoRoute 开关）
-      //   - autoRoute=false 且 mode !== 'route' 时保留用户选择
+      // 3) 用户选了普通 agent：仅 mode === 'route' 时强制走 orchestrator，否则保留用户选择
       const { mode } = useModeStore.getState();
-      const forceRoute = mode === 'route';
-      if (!forceRoute && !autoRoute) {
+      if (mode !== 'route') {
         return {
           entryAgent: selectedAgent,
           extraChildren: undefined,

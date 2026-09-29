@@ -16,7 +16,7 @@ import {
 	Wrench,
 	type LucideIcon,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -25,7 +25,11 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { ToolCall } from "@/stores/chatStore";
 
 import { parsePipeTable, PipeTable } from "@/components/chat/panels/PipeTable";
-import AskUserCard from "@/components/chat/messages/AskUserCard";
+import {
+	useStreamingSegments,
+	useStreamingTailPreview,
+	type Segment,
+} from "@/components/chat/hooks/useStreamingSegments";
 
 interface Props {
 	autoFoldThink?: boolean;
@@ -40,19 +44,6 @@ interface Props {
 	toolCalls?: ToolCall[];
 }
 
-interface Segment {
-	content: string;
-	done: boolean;
-	type: "file" | "output" | "think";
-}
-
-/** 单条工具调用段 — 渲染为一个 ToolCallActivity */
-interface ToolCallSegment {
-	done: boolean;
-	tc: ToolCall;
-	type: "toolcall";
-}
-
 export const StreamingMessage = memo(function StreamingMessage({
 	autoFoldThink = true,
 	content,
@@ -60,94 +51,20 @@ export const StreamingMessage = memo(function StreamingMessage({
 	toolCalls,
 }: Props) {
 	/**
-	 * 流式期间也跑 parseContent：让 <think> / @@FILE: 块在流式过程中就实时切段。
-	 * 2026-07-04 P1-1 终态: 移除 <tool_call> / <tool_result> 切分 — 原生 function call 路径下
-	 * content 仅为纯文本(已过滤 XML 包装),工具调用走 chatStore.Message.toolCalls 强类型渲染。
-	 *
-	 * 性能权衡：
-	 * - 上游 scheduleStreamingUpdate 已做 rAF 节流（每帧最多 1 次 setState），
-	 *   parseContent 实际执行频率受此约束，不会爆主线程。
-	 * - 历史上曾尝试 useDeferredValue + startTransition 双重降级，但 React 18 短消息场景
-	 *   会触发渲染循环导致 WebView2 进程崩溃，已回退；本版本不再使用。
+	 * 2026-08-31 抽离: 解析 + 穿插 + 折叠工具块统一到 useStreamingSegments Hook
+	 * 性能权衡: 上游 scheduleStreamingUpdate 已做 rAF 节流(parseContent
+	 *   实际执行频率受此约束,不会爆主线程)。
+	 * 历史上曾尝试 useDeferredValue + startTransition 双重降级,但 React 18
+	 *   短消息场景会触发渲染循环导致 WebView2 进程崩溃,已回退;本版本不再使用。
 	 */
-	const segments = useMemo<Segment[]>(() => {
-		return parseContent(content, !isStreaming);
-	}, [content, isStreaming]);
-	// 2026-07-24: 按 _anchor (precedingContentLen) 精确穿插 tc 到 content 字符位置
-	//   - 把 text 段按 character offset 切到一棵"位置表"里
-	//   - tc 按 _anchor 找到对应位置插入
-	//   - 无 _anchor 的 tc 排到末尾(罕见, 如 ACP 路径)
-	const visibleSegments = useMemo<
-		(Segment | ToolCallSegment | ToolGroupSegment)[]
-	>(() => {
-		const tcs = toolCalls ?? [];
-		if (tcs.length === 0) {
-			return segments.filter((s) => s.type !== "file") as (
-				| Segment
-				| ToolCallSegment
-			)[];
-		}
-		// 1) 收集每个 output 段的 (start, end) 字符偏移 (think 段也按其 content 长度计入)
-		const texts = segments.filter((s) => s.type !== "file");
-		const offsetList: { end: number; seg: Segment; start: number }[] = [];
-		let cursor = 0;
-		for (const seg of texts) {
-			const len = seg.content.length;
-			offsetList.push({ end: cursor + len, seg, start: cursor });
-			cursor += len;
-		}
-		// 2) 按 _anchor 排序 tc; 无 anchor 排到末尾
-		const withAnchor = tcs
-			.map((tc) => ({
-				tc,
-				anchor: (tc as ToolCall & { _anchor?: number })._anchor,
-			}))
-			.filter(
-				(x): x is { tc: ToolCall; anchor: number } =>
-					typeof x.anchor === "number",
-			)
-			.sort((a, b) => a.anchor - b.anchor);
-		const noAnchor = tcs.filter(
-			(tc) =>
-				typeof (tc as ToolCall & { _anchor?: number })._anchor !== "number",
-		);
-		// 3) 合并: 遍历 text 段, 每段先 push 自身, 再 push 落在它 [start, end) 区间内的 tc
-		const result: (Segment | ToolCallSegment)[] = [];
-		let tcIdx = 0;
-		for (const { start, end, seg } of offsetList) {
-			result.push(seg);
-			while (
-				tcIdx < withAnchor.length &&
-				withAnchor[tcIdx].anchor >= start &&
-				withAnchor[tcIdx].anchor < end
-			) {
-				const tc = withAnchor[tcIdx].tc;
-				result.push({ done: tc.status !== "pending", tc, type: "toolcall" });
-				tcIdx++;
-			}
-		}
-		// 4) 剩余的 tc (anchor > 全部 text 长度 OR 无 anchor) 追加到末尾
-		for (; tcIdx < withAnchor.length; tcIdx++) {
-			const tc = withAnchor[tcIdx].tc;
-			result.push({ done: tc.status !== "pending", tc, type: "toolcall" });
-		}
-		for (const tc of noAnchor) {
-			result.push({ done: tc.status !== "pending", tc, type: "toolcall" });
-		}
-		return mergeToolOps(result);
-	}, [segments, toolCalls]);
+	const { segments, visibleSegments } = useStreamingSegments(
+		content,
+		toolCalls,
+		isStreaming,
+	);
 	// 流式输出底部打字机预览：取最近 ~60 字符作为"AI 正在说什么"的实时反馈。
 	// 即使当前在执行 tool_call（无 output 段可显示），也保留占位行告诉用户任务还在跑。
-	const tailPreview = useMemo(() => {
-		if (!isStreaming) return "";
-		const lastOutput = [...segments]
-			.reverse()
-			.find((seg) => seg.type === "output");
-		const raw = lastOutput?.content ?? content ?? "";
-		// 去掉首尾空白 + 合并多空白，避免打字机出现奇怪换行
-		const cleaned = raw.replace(/\s+/g, " ").trim();
-		return cleaned.length > 60 ? `…${cleaned.slice(-60)}` : cleaned;
-	}, [segments, content, isStreaming]);
+	const tailPreview = useStreamingTailPreview(content, segments, isStreaming);
 
 	return (
 		<div className="w-full min-w-0 space-y-3">
@@ -159,9 +76,10 @@ export const StreamingMessage = memo(function StreamingMessage({
 					return <ToolGroup key={`tg-${seg.tcs[0].id}`} tcs={seg.tcs} />;
 				}
 				if (seg.type === "toolcall") {
-					// 2026-07-24: AskUser 工具是交互型,气泡内展开为提问卡
+					// 2026-08-31: AskUser 提问卡迁移到 ChatInput 上方渲染(AskUserDock),
+					// 避免在气泡里展开时与顶部卡重复,也让用户无论怎么滚都看得到提问
 					if (seg.tc.toolName === "AskUser") {
-						return <AskUserCard key={`tc-ask-${seg.tc.id}`} tcId={seg.tc.id} />;
+						return null;
 					}
 					return <ToolCallActivity key={`tc-${seg.tc.id}`} tc={seg.tc} />;
 				}
@@ -170,7 +88,9 @@ export const StreamingMessage = memo(function StreamingMessage({
 						autoFoldThink={autoFoldThink}
 						isLast={i === visibleSegments.length - 1}
 						isStreaming={isStreaming}
-						key={`${seg.type}-${i}`}
+						// R2 (2026-09-06): key 用段起始偏移(稳定),替代 `${type}-${i}`
+						// 修复: 旧 key 含 type,段类型变化时组件重建,typeRef 折叠态重置逻辑成死代码
+						key={`seg-${seg.start}`}
 						seg={seg}
 					/>
 				);
@@ -235,6 +155,10 @@ function SegmentBlock({
 	const doneRef = useRef(seg.done);
 	/** 记录上一帧 seg.type, 用于检测 type 切换时重置折叠态 */
 	const typeRef = useRef(seg.type);
+	/** 2026-08-31: think 块内部滚动容器 ref,用于流式期间自动滚到底 */
+	const thinkScrollRef = useRef<HTMLDivElement | null>(null);
+	/** 用户是否主动向上滚动过(向上翻看历史)— 此时不应强制滚到底 */
+	const userScrolledUpRef = useRef(false);
 
 	/** 修复 1 (2026-07-10): seg.type 切换时(例: output → think → output)按"新 type 的用户态"重置折叠态
 	 *  旧实现: useState lazy init 只跑一次, 流式期间同 i 位置 seg.type 变化时 isExpanded 不会重置,
@@ -262,6 +186,23 @@ function SegmentBlock({
 		}
 		doneRef.current = seg.done;
 	}, [seg.done, seg.type, autoFoldThink]);
+
+	/** 2026-08-31: think 块内容变化时自动滚到底
+	 *  触发条件:
+	 *   - 思考进行中(seg.type==="think" && !seg.done): 强制滚到底
+	 *   - 用户刚展开已完成 think: 滚到底(让用户看到结尾)
+	 *  防护: 用户主动向上滚轮翻看历史时, 不强制滚动(尊重用户阅读位置)
+	 *  实现: 每次 content 变化后,若未向上滚则 scrollTop = scrollHeight
+	 */
+	useEffect(() => {
+		if (seg.type !== "think") return;
+		const el = thinkScrollRef.current;
+		if (!el) return;
+		// 内容变化时,若用户没主动向上滚 → 滚到底
+		if (!userScrolledUpRef.current) {
+			el.scrollTop = el.scrollHeight;
+		}
+	}, [seg.content, seg.type, isExpanded]);
 
 	const handleToggle = () => {
 		userControlledByTypeRef.current[seg.type] = true;
@@ -316,7 +257,16 @@ function SegmentBlock({
 					{isFile ? (
 						<FileBlock isStreaming={isCurrentSegment}>{seg.content}</FileBlock>
 					) : isThinking ? (
-						<div className="text-muted-foreground/80 max-h-[30vh] overflow-y-auto border-primary/20 bg-muted/30 overflow-hidden whitespace-pre-wrap break-words rounded-r-md border-l-2 p-2 pl-2 italic">
+						<div
+							className="text-muted-foreground/80 max-h-[30vh] overflow-y-auto border-primary/20 bg-muted/30 overflow-hidden whitespace-pre-wrap break-words rounded-r-md border-l-2 p-2 pl-2 italic"
+							ref={thinkScrollRef}
+							onScroll={(e) => {
+								// 检测用户主动向上滚: scrollTop 距底 > 30px 则视为"在看历史"
+								const t = e.currentTarget;
+								const distanceToBottom =
+									t.scrollHeight - t.scrollTop - t.clientHeight;
+								userScrolledUpRef.current = distanceToBottom > 30;
+							}}>
 							{seg.content}
 						</div>
 					) : (
@@ -371,82 +321,10 @@ function SegmentBlock({
 	);
 }
 
-/** @@FILE: 块的正则匹配 */
-const FILE_BLOCK_REGEX = /^@@FILE:(.+)\n([\s\S]*?)(?=^@@FILE:|$)/gm;
-
-/** 正则：仅识别 <think>...</think> 块和 @@FILE: 块
- *  2026-07-04 P1-1 终态: 不再识别 <tool_call> / <tool_result> — 走原生 function call 路径
+/** 2026-08-31 抽离: parseContent / 标签常量 / mergeToolOps 已迁至
+ *  frontend/src/components/chat/hooks/useStreamingSegments.ts
+ *  本文件保留 UI 渲染 + 折叠态管理
  */
-const THINK_START = "<think>";
-const THINK_END = "</think>";
-
-/** 解析 content 中的 <think> 与 @@FILE: 块,其余为 output
- *  原生 function call 路径下 content 已是纯文本(无 XML 工具标签),但仍保留 <think>
- *  折叠展示(部分 provider 通过 <think> 标签输出思考过程)
- */
-function parseContent(content: string, allDone: boolean): Segment[] {
-	const segments: Segment[] = [];
-	let buffer = "";
-	let inThink = false;
-	let i = 0;
-
-	while (i < content.length) {
-		if (inThink) {
-			const endIdx = content.indexOf(THINK_END, i);
-			if (endIdx === -1) {
-				buffer += content.slice(i);
-				if (buffer) {
-					segments.push({ content: buffer, done: allDone, type: "think" });
-				}
-				buffer = "";
-				i = content.length;
-			} else {
-				buffer += content.slice(i, endIdx);
-				if (buffer) {
-					segments.push({ content: buffer, done: true, type: "think" });
-					buffer = "";
-				}
-				i = endIdx + THINK_END.length;
-				inThink = false;
-			}
-			continue;
-		}
-
-		if (content.startsWith(THINK_START, i)) {
-			if (buffer) {
-				segments.push({ content: buffer, done: true, type: "output" });
-				buffer = "";
-			}
-			i += THINK_START.length;
-			inThink = true;
-			continue;
-		}
-
-		// @@FILE: 块(文件应用,需独立成段渲染)
-		if (content.slice(i).startsWith("@@FILE:")) {
-			if (buffer) {
-				segments.push({ content: buffer, done: true, type: "output" });
-				buffer = "";
-			}
-			const rest = content.slice(i);
-			const nextFileMatch = rest.slice(1).match(/^@@FILE:/);
-			const nextFileIndex = nextFileMatch ? nextFileMatch.index! + 1 : -1;
-			const endIndex = nextFileIndex > 0 ? nextFileIndex : rest.length;
-			const fileContent = rest.slice(0, endIndex);
-			segments.push({ content: fileContent, done: allDone, type: "file" });
-			i += endIndex;
-			continue;
-		}
-
-		// 其余一律累积为 output
-		buffer += content.slice(i, i + 1);
-		i++;
-	}
-	if (buffer) {
-		segments.push({ content: buffer, done: allDone, type: "output" });
-	}
-	return segments;
-}
 
 /** 文件块组件，支持折叠 */
 function FileBlock({
@@ -485,19 +363,26 @@ function FileBlock({
 			{/* 文件内容 */}
 			{isExpanded && (
 				<div className="relative w-full overflow-x-auto">
-					<SyntaxHighlighter
-						customStyle={{
-							borderRadius: "0 0 0.5rem 0.5rem",
-							fontSize: "0.85rem",
-							margin: 0,
-							maxWidth: "100%",
-							overflowX: "auto",
-							width: "100%",
-						}}
-						language="text"
-						style={oneDark}>
-						{fileContent}
-					</SyntaxHighlighter>
+					{isStreaming ? (
+						// P2 (2026-09-06): 流式期间降级纯文本渲染,避免每帧全量语法高亮(性能杀手)
+						<pre className="bg-[#282c34] w-full rounded-b-lg p-3 font-mono text-[0.85rem] leading-relaxed whitespace-pre-wrap break-all text-gray-200">
+							{fileContent}
+						</pre>
+					) : (
+						<SyntaxHighlighter
+							customStyle={{
+								borderRadius: "0 0 0.5rem 0.5rem",
+								fontSize: "0.85rem",
+								margin: 0,
+								maxWidth: "100%",
+								overflowX: "auto",
+								width: "100%",
+							}}
+							language="text"
+							style={oneDark}>
+							{fileContent}
+						</SyntaxHighlighter>
+					)}
 					{isStreaming && (
 						<span className="text-primary absolute bottom-2 right-2 animate-pulse text-xs">
 							▊
@@ -570,19 +455,26 @@ function CodeBlock({
 			{/* 代码内容 */}
 			{isExpanded && (
 				<div className="relative w-full overflow-x-auto">
-					<SyntaxHighlighter
-						customStyle={{
-							borderRadius: "0 0 0.5rem 0.5rem",
-							fontSize: "0.85rem",
-							margin: 0,
-							maxWidth: "100%",
-							overflowX: "auto",
-							width: "100%",
-						}}
-						language={language || "text"}
-						style={oneDark}>
-						{children}
-					</SyntaxHighlighter>
+					{isStreaming ? (
+						// P2 (2026-09-06): 流式期间降级纯文本渲染,避免每帧全量语法高亮(性能杀手)
+						<pre className="bg-[#282c34] w-full rounded-b-lg p-3 font-mono text-[0.85rem] leading-relaxed whitespace-pre-wrap break-all text-gray-200">
+							{children}
+						</pre>
+					) : (
+						<SyntaxHighlighter
+							customStyle={{
+								borderRadius: "0 0 0.5rem 0.5rem",
+								fontSize: "0.85rem",
+								margin: 0,
+								maxWidth: "100%",
+								overflowX: "auto",
+								width: "100%",
+							}}
+							language={language || "text"}
+							style={oneDark}>
+							{children}
+						</SyntaxHighlighter>
+					)}
 					{isStreaming && (
 						<span className="text-primary absolute bottom-2 right-2 animate-pulse text-xs">
 							▊
@@ -635,43 +527,7 @@ const DEFAULT_ACTIVITY_DISPLAY: { icon: LucideIcon; verb: string } = {
 	verb: "调用",
 };
 
-/** 连续多个 toolCall 合并后的折叠块 */
-interface ToolGroupSegment {
-	tcs: ToolCall[];
-	type: "toolgroup";
-}
-
-/** 相邻 ≥ TOOL_GROUP_THRESHOLD 个 toolCall 折成 ToolGroup(1-2 个还原成单行) */
-const TOOL_GROUP_THRESHOLD = 3;
-
-/** 折叠规则: 任意两个相邻 toolCall 之间不允许夹非工具(text 段强制 flush 桶) */
-function mergeToolOps(
-	items: (Segment | ToolCallSegment)[],
-): (Segment | ToolCallSegment | ToolGroupSegment)[] {
-	const result: (Segment | ToolCallSegment | ToolGroupSegment)[] = [];
-	let toolBucket: ToolCall[] = [];
-	const flushBucket = () => {
-		if (toolBucket.length === 0) return;
-		if (toolBucket.length >= TOOL_GROUP_THRESHOLD) {
-			result.push({ tcs: toolBucket, type: "toolgroup" });
-		} else {
-			for (const tc of toolBucket) {
-				result.push({ done: tc.status !== "pending", tc, type: "toolcall" });
-			}
-		}
-		toolBucket = [];
-	};
-	for (const item of items) {
-		if (item.type === "toolcall") {
-			toolBucket.push(item.tc);
-		} else {
-			flushBucket();
-			result.push(item);
-		}
-	}
-	flushBucket();
-	return result;
-}
+// ToolGroupSegment / mergeToolOps / TOOL_GROUP_THRESHOLD 已抽离到 useStreamingSegments
 
 /** 2026-07-08: 取工具的 pending 状态展示动词
  *  pending 时返回 <动词>中(Read→读取中、Write→写入中、Edit→编辑中、Delete→删除中、其它→执行中)
@@ -877,11 +733,14 @@ function ToolGroup({ tcs }: { tcs: ToolCall[] }) {
 	const latest = getLatestTc(tcs);
 	const latestText = latest ? formatActivityLine(latest) : "";
 	const hasPending = tcs.some((tc) => tc.status === "pending");
+	// 2026-08-31 增补: 完整顺序概览(成功 N / 失败 M),解决"合并后只显示最后"混淆
+	const successCount = tcs.filter((tc) => tc.status === "success").length;
+	const errorCount = tcs.filter((tc) => tc.status === "error").length;
 	// 完成度概览: 全部 success → 1 个绿点; 有 error → 1 个红点; 还在跑 → 1 个蓝点
 	const LeadingIcon = hasPending ? Loader2 : FolderOpen;
 	const leadingColor = hasPending
 		? "text-blue-500 animate-spin"
-		: tcs.some((tc) => tc.status === "error")
+		: errorCount > 0
 			? "text-red-500"
 			: "text-foreground/70";
 
@@ -896,6 +755,18 @@ function ToolGroup({ tcs }: { tcs: ToolCall[] }) {
 				<span className="text-muted-foreground/70 shrink-0">
 					({tcs.length})
 				</span>
+				{/* 成功/失败概览 — 折叠态下也能一眼看到全部进度 */}
+				{successCount > 0 && (
+					<span className="shrink-0 text-green-600 dark:text-green-400">
+						✓{successCount}
+					</span>
+				)}
+				{errorCount > 0 && (
+					<span className="shrink-0 text-red-500">✗{errorCount}</span>
+				)}
+				{hasPending && (
+					<span className="shrink-0 text-blue-500">…{tcs.length - successCount - errorCount}</span>
+				)}
 				{latestText && (
 					<>
 						<span className="text-muted-foreground/60 shrink-0">·</span>

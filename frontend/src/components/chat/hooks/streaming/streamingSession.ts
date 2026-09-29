@@ -24,7 +24,8 @@ import { useChatStore, type ProgressStage } from '@/stores/chatStore';
 import { usePlanStore, type Plan } from '@/stores/planStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { executeToolCall, toolRegistry, toolNameAliases } from '@/lib/tools/registry';
-import type { StreamingContext } from './streamingContext';
+import type { StreamingContext, NativeCallBuf } from './streamingContext';
+import type { ChatMessage } from '@/lib/chat/protocol';
 
 const LOG = 'chat:streaming';
 
@@ -110,24 +111,59 @@ function parsePlanXml(text: string): Plan | null {
   };
 }
 
-/** 方案 A 兜底: 单条非 file 结果超过此上限则整条省略,防单条撑爆上下文 */
+/** 方案 A 兜底: 单条非 file 结果超过此上限则降级为"头部预览 + 截断标记",防单条撑爆上下文 */
 const SINGLE_RESULT_HARD_CAP = 10_000;
+
+/** 超限单条保留的头部预览字符数(替代旧的整条丢弃,AI 至少能感知内容开头) */
+const SINGLE_RESULT_PREVIEW_CHARS = 2_000;
+
+/** file 类豁免总量上限 = threshold × 该系数;超出后最旧的 file 结果降级为摘要标记,防豁免失控撑爆窗口 */
+const FILE_EXEMPT_CAP_RATIO = 4;
+
+/** B3 (2026-09-06): 单次工具执行超时(ms)。防止工具 promise 永不 resolve 导致
+ *  pendingToolResultsRef 永不归零 → streamingId 永不清理 → UI 永远"正在输出"卡死 */
+const TOOL_EXEC_TIMEOUT_MS = 120_000;
+
+/** B3 (2026-09-06): 给工具执行加超时兜底 — 正常完成/失败时清理定时器,超时则 reject */
+function withToolTimeout(promise: Promise<ToolResult>, timeoutMs: number): Promise<ToolResult> {
+  return new Promise<ToolResult>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`工具执行超时(${timeoutMs / 1000}s)`)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** 工具结果文本化(错误优先) —— 长度统计与压缩共用同一实现,避免双源长度失配 */
+function toolResultText(r: ToolResult): string {
+  return r.error ? `[工具错误]\n${r.error}` : (r.output ?? '');
+}
 
 /**
  * P0-2: 工具结果累积自动 compact
  *
  * 续传触发前若 accumulatedResults 总字符数超过阈值,自动按 category 智能压缩。
  *
- * 2026-08-19 方案 A: 移除单条截断,改为"跨结果省略"策略
- *   - 旧策略: 单条 > headChars 截断 → AI 拿到半截内容误以为完整
- *     → 判断"信息不足" → 重查 → 结果又被截断 → 死循环
- *   - 新策略: 预算内每条结果完整保留;超预算的整条省略 + [结果已省略] 明确标记
+ * 2026-08-19 方案 A: "跨结果省略"策略
+ *   - 预算内每条结果完整保留;超预算的整条省略 + [结果已省略] 明确标记
  *     → AI 要么拿到完整数据,要么明确知道"这条没给",可换策略而非盲目重查
  *
  * 策略(category-aware, LLM-free):
- *   - file 类(读文件/grep 等):永远保留完整内容,绝不压缩,不计预算
- *     → 原因:结构化代码 / 文件内容,主体丢失 AI 瞎猜
- *   - 单条 > SINGLE_RESULT_HARD_CAP 的非 file 结果:整条省略(防撑爆上下文)
+ *   - file 类(读文件/grep 等):保留完整内容,不计字符预算
+ *     → 但有总量上限(FILE_EXEMPT_CAP_RATIO × threshold),超限后最旧的 file 条目
+ *       降级为 [文件结果已省略] 标记,防止全 file 场景豁免失控撑爆模型窗口
+ *   - 单条 > SINGLE_RESULT_HARD_CAP 的非 file 结果:保留头部预览 + 截断标记
+ *     (不再整条丢弃,AI 至少能感知内容开头与缺失量级)
  *   - 其余:预算(threshold)内完整保留;预算耗尽后省略最早的结果
  *
  * ⚠️ 预算按"最新结果优先"分配(倒序),省略的是 AI 已消费过的早期结果。
@@ -140,66 +176,127 @@ function compactAccumulatedResults(
   threshold: number,
 ): {
   compacted: string[];
-  /** 被省略的条数(meta/plan 类,不含豁免的 file 类) */
+  /** 被整条省略的条数(meta/plan 类,不含豁免的 file 类) */
   truncatedCount: number;
-  /** 豁免跳过的 file 类条数 */
+  /** 超限降级为头部预览的单条数 */
+  previewCount: number;
+  /** 按原样保留的 file 类条数(含未知类目兜底豁免) */
   skippedFileCount: number;
+  /** 因豁免总量上限被降级的 file 类条数 */
+  truncatedFileCount: number;
+  /** 未注册工具条数(按 file 兜底豁免,反馈中提示用户) */
+  unknownCategoryCount: number;
   originalChars: number;
   compactedChars: number;
 } {
-  const stringify = (r: ToolResult) =>
-    r.error ? `[工具错误]\n${r.error}` : (r.output ?? '');
-
-  const originalChars = results.reduce((sum, r) => sum + stringify(r).length, 0);
+  const texts = results.map(toolResultText);
+  const originalChars = texts.reduce((sum, t) => sum + t.length, 0);
   if (threshold <= 0 || originalChars <= threshold) {
-    const cloned = results.map(stringify);
     return {
-      compacted: cloned,
+      compacted: texts,
       originalChars,
       compactedChars: originalChars,
       truncatedCount: 0,
+      previewCount: 0,
       skippedFileCount: 0,
+      truncatedFileCount: 0,
+      unknownCategoryCount: 0,
     };
   }
 
   // 预算优先分配给最新结果(倒序分配),省略"最早"的已消费结果
   const keep = new Set<number>();
+  /** 超限单条的头部预览(i → 预览文本) */
+  const previews = new Map<number, string>();
+  /** file 类索引(倒序收集,尾部即最旧) */
+  const fileIndexes: number[] = [];
   let budget = threshold;
-  let skippedFileCount = 0;
+  let exemptFileChars = 0;
   for (let i = results.length - 1; i >= 0; i--) {
     const r = results[i];
-    const text = stringify(r);
+    const text = texts[i];
     if (r.category === 'file') {
-      // file 类永远完整保留,不计字符预算,不计 truncatedCount
+      // file 类先全部标记保留并累计豁免量,总量超限后再降级最旧条目
       keep.add(i);
-      skippedFileCount++;
+      fileIndexes.push(i);
+      exemptFileChars += text.length;
       continue;
     }
-    // 兜底: 单条超大结果整条省略(超大概率是异常/超大返回),防撑爆上下文
-    if (text.length > SINGLE_RESULT_HARD_CAP) continue;
+    // 兜底: 单条超大结果不再整条丢弃,改为头部预览 + 明确截断标记
+    if (text.length > SINGLE_RESULT_HARD_CAP) {
+      if (budget >= SINGLE_RESULT_PREVIEW_CHARS) {
+        keep.add(i);
+        previews.set(i, text.slice(0, SINGLE_RESULT_PREVIEW_CHARS));
+        budget -= SINGLE_RESULT_PREVIEW_CHARS;
+      }
+      continue;
+    }
     if (budget >= text.length) {
       keep.add(i);
       budget -= text.length;
     }
   }
 
-  // 正序输出,保持 AI 阅读顺序(省略的替换为标记)
+  // 豁免总量上限:超限后把"最旧"的 file 条目降级为摘要标记(fileIndexes 倒序收集,从尾遍历即最旧优先)
+  const exemptCap = threshold * FILE_EXEMPT_CAP_RATIO;
+  const droppedFiles = new Set<number>();
+  if (exemptFileChars > exemptCap) {
+    let over = exemptFileChars - exemptCap;
+    for (let j = fileIndexes.length - 1; j >= 0 && over > 0; j--) {
+      const idx = fileIndexes[j];
+      droppedFiles.add(idx);
+      over -= texts[idx].length;
+    }
+  }
+
+  // 正序输出,保持 AI 阅读顺序(省略/截断的替换为明确标记)
   const compacted: string[] = [];
   let compactedChars = 0;
   let truncatedCount = 0;
+  let previewCount = 0;
+  let skippedFileCount = 0;
+  let truncatedFileCount = 0;
+  let unknownCategoryCount = 0;
   for (let i = 0; i < results.length; i++) {
-    const text = stringify(results[i]);
-    if (keep.has(i)) {
-      compacted.push(text);
-      compactedChars += text.length;
-    } else {
+    const r = results[i];
+    const text = texts[i];
+    if (r.unknownCategory) unknownCategoryCount++;
+    if (!keep.has(i)) {
       const marker = `[结果已省略,原 ${text.length} 字符]`;
       compacted.push(marker);
       compactedChars += marker.length;
       truncatedCount++;
+      continue;
     }
+    if (droppedFiles.has(i)) {
+      const marker = `[文件结果已省略,原 ${text.length} 字符](豁免总量超限,如需完整内容请重新读取)`;
+      compacted.push(marker);
+      compactedChars += marker.length;
+      truncatedFileCount++;
+      continue;
+    }
+    const preview = previews.get(i);
+    if (preview !== undefined) {
+      const marked = `${preview}\n[...单条超限已截断,原 ${text.length} 字符,仅保留前 ${SINGLE_RESULT_PREVIEW_CHARS} 字符]`;
+      compacted.push(marked);
+      compactedChars += marked.length;
+      previewCount++;
+      continue;
+    }
+    compacted.push(text);
+    compactedChars += text.length;
+    if (r.category === 'file') skippedFileCount++;
   }
-  return { compacted, originalChars, compactedChars, truncatedCount, skippedFileCount };
+  return {
+    compacted,
+    originalChars,
+    compactedChars,
+    truncatedCount,
+    previewCount,
+    skippedFileCount,
+    truncatedFileCount,
+    unknownCategoryCount,
+  };
 }
 
 /** 通过 call.name → toolRegistry 查询工具 category;找不到时**保守豁免**(fallback 'file')
@@ -210,14 +307,15 @@ function compactAccumulatedResults(
  *     仍然被截到 500 字符,等同于"未知即压缩",持续触发"对话不准"
  *   - 'file' 是豁免分支,天然安全;新工具注册到 registry 后会被自然分类
  */
-function resolveToolCategory(callName: string): ToolCategory {
+function resolveToolCategory(callName: string): { category: ToolCategory; unknown: boolean } {
   const canonical = toolNameAliases[callName] ?? callName;
   const tool = toolRegistry.get(canonical);
   if (!tool) {
     devLog.d(LOG, `resolveToolCategory: unknown tool "${callName}", skip compact by default`);
-    return 'file'; // 兜底 = 豁免
+    // 兜底 = 豁免;unknown 标记随 result 上报,压缩统计中可见(避免静默豁免无感)
+    return { category: 'file', unknown: true };
   }
-  return tool.category;
+  return { category: tool.category, unknown: false };
 }
 
 /**
@@ -313,6 +411,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
   const originalAiContentRef = ctx.originalAiContentRef;
   const isMountedRef = ctx.isMountedRef;
   const isPausedRef = ctx.isPausedRef;
+  const nativeToolCallsRef = ctx.nativeToolCallsRef;
   const pendingToolResultsRef = ctx.pendingToolResultsRef;
   const scheduleStreamingUpdate = ctx.scheduleStreamingUpdate;
   const setStreamingContent = ctx.setStreamingContent;
@@ -321,7 +420,9 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
   const stopStreaming = ctx.stopStreaming;
   const streamingContentRef = ctx.streamingContentRef;
   const streamingIdRef = ctx.streamingIdRef;
+  const streamingRawRafIdRef = ctx.streamingRawRafIdRef;
   const triggerContinuationRef = ctx.sendContinuationRef;
+  const waitingForContinuationRef = ctx.waitingForContinuationRef;
   const updateMessage = ctx.updateMessage;
   const onFeedback = ctx.onFeedback;
   const onAgentNodesFinalize = ctx.onAgentNodesFinalize;
@@ -334,20 +435,21 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
   // 时,首次记录签名,之后同签名直接静默 — 避免 "已跳过 N 个残缺 tool_call" 日志轰炸 UI
   // 签名策略: name + JSON.stringify(input).slice(0, 80) → 同工具 + 同截断前缀视为同一 call
   const incompleteCallSignaturesRef = useRef<Set<string>>(new Set());
+  /** 已执行工具的语义指纹(name + 稳定参数),防模型换 ID 重复调用同一工具。 */
+  const executedToolFingerprintsRef = useRef<Set<string>>(new Set());
+  /** 连续无新增结果/重复回答轮数,用于完成态熔断。 */
+  const stagnantContinuationRoundsRef = useRef(0);
+  const lastContinuationFingerprintRef = useRef('');
   // P3: 原生 tool_call 累积器 (跨 chunk 累积, 按 index 合并)
   // 后端 type='tool_call' 事件逐个到, 这里累积到 finished=true 才调 processToolCalls
   // 避免前端再走 "从 content 正则扣 XML" 路径
-  type NativeCallBuf = {
-    /** 2026-07-07: 后端传来的 anchor, 表示 toolCall 出现时累计 content 字符数 */
-    anchor?: number;
-    id: string;
-    name: string;
-    args: string;
-    finished: boolean;
-  };
-  const nativeToolCallsRef = useRef<Map<number, NativeCallBuf>>(new Map());
+  // 注: nativeToolCallsRef 已提升到 ctx(streamingContext.ts),stop 时由 controller 统一清理
   /** 已执行的工具调用记录 ({id, name, input})，续传时用于构造 assistant tool_calls 消息 */
   const executedToolCallsRef = useRef<ToolCall[]>([]);
+  /** 当前 provider 响应的原始推理元数据；按续传轮次快照并原样回传。 */
+  const reasoningDetailsRef = useRef<Array<Record<string, unknown>>>([]);
+  const providerContentBlocksRef = useRef<Map<number, Record<string, unknown>>>(new Map());
+	const providerUsageReceivedRef = useRef(false);
   /** 流式内容字符累积计数器，每 N 字符触发一次 store 写入（防止 crash 丢数据） */
   const flushCharsAccum = useRef(0);
   /** 方案 C (2026-08-19): 上次续传时 originalAiContentRef 的长度,用于增量提取 AI 思考
@@ -355,8 +457,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
    *       但此时 originalAiContentRef 刚被 sendMessage 清空为 "",导致续传时 assistant
    *       消息 content 为空 → 模型看不到 AI 上轮的思考(含已确认的路径) → 反复重新搜索 */
   const lastAssistantTextLenRef = useRef(0);
-  /** streamingRawContent rAF 节流：避免高频 chunk 直接触发 setState → WebView2 进程崩溃 */
-  const streamingRawRafIdRef = useRef<number | null>(null);
+  // 注: streamingRawRafIdRef 已提升到 ctx(streamingContext.ts),stop 时由 controller 统一取消
   const originalRequestRef = useRef<{
     assistantMsgId: string;
     chatRequest: StreamChatRequestLike;
@@ -375,10 +476,14 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
   const continuationTranscriptRef = useRef<
     Array<{
       assistantText: string;
+	  providerContentBlocks: Array<Record<string, unknown>>;
+	  reasoningDetails: Array<Record<string, unknown>>;
       toolCalls: ToolCall[];
       resultCount: number;
     }>
   >([]);
+  /** 已发给 provider 的完整标准化续传序列，跨用户轮持久化到 assistant 消息。 */
+  const providerTranscriptRef = useRef<ChatMessage[]>([]);
   /** 已快照的 toolCalls / results 数量(用于计算每轮新增) */
   const snapshottedToolCallCountRef = useRef(0);
   const snapshottedResultCountRef = useRef(0);
@@ -388,6 +493,21 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
   /** PR-1 (2026-07-10): 当前 session 的 progress 阶段 + percent,跨 phase 事件保持 */
   const currentProgressStageRef = useRef<ProgressStage | null>(null);
   const currentProgressPercentRef = useRef<number | null>(null);
+
+  const stableToolFingerprint = (call: ToolCall): string => {
+    const normalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(normalize);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, item]) => [key, normalize(item)]),
+        );
+      }
+      return value;
+    };
+    return `${call.name.toLowerCase()}|${JSON.stringify(normalize(call.input ?? {}))}`;
+  };
 
   // === 内部函数：执行工具调用 + 累积 result XML + 触发 continuation ===
   const processToolCalls = useCallback(
@@ -430,7 +550,22 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         } else {
           originalId = originalIds[i];
         }
-        if (useSettingsStore.getState().enableToolDedup && executedToolCallIdsRef.current.has(originalId)) continue;
+        const fingerprint = stableToolFingerprint(calls[i]);
+        if (
+          useSettingsStore.getState().enableToolDedup &&
+          (executedToolCallIdsRef.current.has(originalId) ||
+            executedToolFingerprintsRef.current.has(fingerprint))
+        ) {
+          devLog.w(LOG, `${stage}-phase: duplicate semantic tool call suppressed`, {
+            name: calls[i].name,
+            originalId,
+          });
+          continue;
+        }
+        if (useSettingsStore.getState().enableToolDedup) {
+          // 调度时立即占用指纹,防同一批次中 ID 不同但 name+input 相同的调用并行执行。
+          executedToolFingerprintsRef.current.add(fingerprint);
+        }
         newToolCalls.push(calls[i]);
         newOriginalIds.push(originalId);
       }
@@ -494,11 +629,17 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
             input: call.input,
           });
           try {
-            const result = await executeToolCall(call);
+            // B3 (2026-09-06): 工具执行加超时兜底,避免 promise 永不 resolve 卡死流式
+            const result = await withToolTimeout(
+              executeToolCall(call),
+              TOOL_EXEC_TIMEOUT_MS,
+            );
             // 2026-07-04: 给 result 附带 category,让 compactAccumulatedResults 智能跳过 file 类
+            const { category, unknown } = resolveToolCategory(call.name);
             accumulatedResultsRef.current.push({
               ...result,
-              category: resolveToolCategory(call.name),
+              category,
+              unknownCategory: unknown,
             });
             // 记录已执行的 tool call, 用于续传时构造标准 assistant(tool_calls) 消息
             executedToolCallsRef.current.push({ id: call.id, name: call.name, input: call.input });
@@ -528,7 +669,14 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
               error: String(error),
             });
             const errMsg = error instanceof Error ? error.message : String(error);
-            const failedResult: ToolResult = { error: errMsg, id: call.id, output: '', category: resolveToolCategory(call.name) };
+            const { category, unknown } = resolveToolCategory(call.name);
+            const failedResult: ToolResult = {
+              category,
+              error: errMsg,
+              id: call.id,
+              output: '',
+              unknownCategory: unknown,
+            };
             accumulatedResultsRef.current.push(failedResult);
             // 错误也不回灌 content,只走 onToolCallUpdated
             onToolCallUpdated?.({
@@ -545,6 +693,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
           } finally {
             if (useSettingsStore.getState().enableToolDedup) {
               executedToolCallIdsRef.current.add(newOriginalIds[i]);
+              executedToolFingerprintsRef.current.add(stableToolFingerprint(call));
             }
             // 关键修复：版本过期仍需递减计数，避免泄漏导致 streamingId 永远不清理
             pendingToolResultsRef.current--;
@@ -586,6 +735,11 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
     flushCharsAccum.current = 0;
     // 如果已被 handleStop 清空或版本过期，直接返回
     if (!triggerContinuationRef.current || continuationVersionRef.current !== currentVersionRef.current) return;
+    if (waitingForContinuationRef.current) {
+      devLog.w(LOG, 'sendContinuation suppressed: another continuation is in flight');
+      return;
+    }
+    waitingForContinuationRef.current = true;
 
     // PR-1 (2026-07-10): 扫描本轮 assistant 输出是否含 <plan>...</plan>
     // 如果有 → 写入 planStore → 等待用户 Approve/Refine/Reject
@@ -615,6 +769,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
           if (decision.action === 'rejected') {
             // 用户拒绝,直接结束流式
             onFeedback?.('🚫 已拒绝 plan,本轮结束');
+            waitingForContinuationRef.current = false;
             return;
           }
         } catch (e) {
@@ -628,6 +783,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         rounds: continuationRoundsRef.current,
       });
       onFeedback?.(`⚠️ 工具调用已达最大轮数 ${useSettingsStore.getState().maxContinuationRounds},自动停止`);
+      waitingForContinuationRef.current = false;
       return;
     }
     const currentRound = (continuationRoundsRef.current += 1);
@@ -640,6 +796,7 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
     const original = originalRequestRef.current;
     if (!original) {
       devLog.w(LOG, 'sendContinuation: originalRequestRef is null, skip');
+      waitingForContinuationRef.current = false;
       return;
     }
 
@@ -657,12 +814,17 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
     // P17: 自动 compact — 压缩工具结果正文,作用于 continuationMessages 的 tool 消息
     // 2026-08-19: 结果正文改由 tool 消息承载(标准协议),user 消息不再拼接
     const settings = useSettingsStore.getState();
-    const totalChars = accumulatedResultsRef.current.reduce((sum, r) =>
-      sum + (r.error ? r.error.length : (r.output?.length ?? 0)), 0);
-    const effectiveThreshold = settings.enableCompactAccumulated
-      ? settings.compactAccumulatedChars
-      : Math.min(8000, settings.compactAccumulatedChars);
-    const shouldCompact = settings.enableCompactAccumulated || totalChars > effectiveThreshold;
+    // 长度统计与 compactAccumulatedResults 共用同一文本化实现,避免双源长度失配
+    const totalChars = accumulatedResultsRef.current.reduce(
+      (sum, r) => sum + toolResultText(r).length,
+      0,
+    );
+    // 开关关闭时原样透传(与 settingsStore 文档承诺一致);阈值 0 视为禁用
+    const effectiveThreshold = settings.compactAccumulatedChars;
+    const shouldCompact =
+      settings.enableCompactAccumulated &&
+      effectiveThreshold > 0 &&
+      totalChars > effectiveThreshold;
     // compacted 与 accumulatedResultsRef 一一对应(省略项替换为标记)
     const compactResult = shouldCompact
       ? compactAccumulatedResults(accumulatedResultsRef.current, effectiveThreshold)
@@ -672,13 +834,28 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         originalChars: compactResult.originalChars,
         compactedChars: compactResult.compactedChars,
         truncatedCount: compactResult.truncatedCount,
+        previewCount: compactResult.previewCount,
+        truncatedFileCount: compactResult.truncatedFileCount,
         skippedFileCount: compactResult.skippedFileCount,
+        unknownCategoryCount: compactResult.unknownCategoryCount,
       });
+      const parts: string[] = [];
+      if (compactResult.truncatedCount > 0)
+        parts.push(`${compactResult.truncatedCount} 个非文件类被省略`);
+      if (compactResult.previewCount > 0)
+        parts.push(`${compactResult.previewCount} 个超长结果仅保留头部预览`);
+      if (compactResult.truncatedFileCount > 0)
+        parts.push(`${compactResult.truncatedFileCount} 个文件类因豁免超限被省略`);
+      if (compactResult.skippedFileCount > 0)
+        parts.push(`${compactResult.skippedFileCount} 个文件类按原样保留`);
+      if (compactResult.unknownCategoryCount > 0)
+        parts.push(`${compactResult.unknownCategoryCount} 个未注册工具按文件类豁免`);
       onFeedback?.(
-        `📦 工具结果累积 ${compactResult.originalChars} 字符已压缩至 ${compactResult.compactedChars} 字符(${compactResult.truncatedCount} 个非文件类被省略,${compactResult.skippedFileCount > 0 ? `${compactResult.skippedFileCount} 个文件类按原样保留` : '无文件类条目'})`,
+        `📦 工具结果累积 ${compactResult.originalChars} 字符已压缩至 ${compactResult.compactedChars} 字符(${parts.join(',')})`,
       );
-    } else if (compactResult && compactResult.skippedFileCount > 0) {
-      devLog.d(LOG, 'compact enabled but all results are file-class, no trunc applied', {
+    } else if (compactResult) {
+      devLog.d(LOG, 'auto-compact ran without omission', {
+        originalChars: compactResult.originalChars,
         skippedFileCount: compactResult.skippedFileCount,
       });
     }
@@ -689,6 +866,8 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
       id: string;
       role: string;
       content: string;
+	  providerContentBlocks?: Array<Record<string, unknown>>;
+	  reasoningDetails?: Array<Record<string, unknown>>;
       toolCalls?: Array<{ id: string; toolName: string; input: Record<string, unknown>; status: string }>;
       toolCallId?: string;
       toolResults?: Array<{ toolCallId: string; result: string }>;
@@ -708,6 +887,25 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
       (planDecisionNote ? `\n${planDecisionNote}` : '');
     lastAssistantTextLenRef.current = fullAssistantText.length;
 
+    const newResultCountForFingerprint =
+      accumulatedResultsRef.current.length - snapshottedResultCountRef.current;
+    const continuationFingerprint = `${assistantText.trim()}|${newResultCountForFingerprint}`;
+    if (continuationFingerprint === lastContinuationFingerprintRef.current) {
+      stagnantContinuationRoundsRef.current += 1;
+    } else {
+      stagnantContinuationRoundsRef.current = 0;
+      lastContinuationFingerprintRef.current = continuationFingerprint;
+    }
+    if (stagnantContinuationRoundsRef.current >= 1) {
+      devLog.w(LOG, 'continuation stopped: no semantic progress', {
+        round: currentRound,
+      });
+      onFeedback?.('✅ 已检测到重复续传且没有新进展，自动结束');
+      waitingForContinuationRef.current = false;
+      stopStreaming();
+      return;
+    }
+
     // 2026-08-19: 按轮快照本轮新增的 (assistant 文本, toolCalls, results)
     // 完整 transcript 语义:每轮续传携带所有轮次快照,每轮只出现一次
     // 修复旧设计"增量文本 + 全量 tool_calls/results"导致的:重复 tool_calls + 缺早期 assistant 文本
@@ -718,9 +916,15 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
       accumulatedResultsRef.current.length - snapshottedResultCountRef.current;
     continuationTranscriptRef.current.push({
       assistantText,
+    providerContentBlocks: Array.from(providerContentBlocksRef.current.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, block]) => ({ ...block })),
+    reasoningDetails: reasoningDetailsRef.current.map((item) => ({ ...item })),
       toolCalls: newToolCalls,
       resultCount: newResultCount,
     });
+  providerContentBlocksRef.current.clear();
+  reasoningDetailsRef.current = [];
     snapshottedToolCallCountRef.current = executedToolCallsRef.current.length;
     snapshottedResultCountRef.current = accumulatedResultsRef.current.length;
 
@@ -733,6 +937,12 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
           id: `${assistantMsgId}-assistant-continuation-${roundIdx}`,
           role: 'assistant',
           content: round.assistantText,
+      providerContentBlocks:
+      round.providerContentBlocks.length > 0
+        ? round.providerContentBlocks
+        : undefined,
+      reasoningDetails:
+      round.reasoningDetails.length > 0 ? round.reasoningDetails : undefined,
           toolCalls:
             round.toolCalls.length > 0
               ? round.toolCalls.map((tc) => ({
@@ -770,6 +980,21 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
       }
       roundIdx++;
     }
+  providerTranscriptRef.current = continuationMessages.map((message) => ({
+    content: message.content,
+    providerContentBlocks: message.providerContentBlocks,
+    reasoningDetails: message.reasoningDetails,
+    role: message.role as ChatMessage['role'],
+    toolCallId: message.toolCallId,
+    toolCalls: message.toolCalls?.map((call) => ({
+      id: call.id,
+      input: call.input,
+      toolName: call.toolName,
+    })),
+  }));
+  updateMessage(convId, assistantMsgId, {
+    providerTranscript: providerTranscriptRef.current.map((message) => ({ ...message })),
+  });
 
     // 2026-08-19: 丢弃旧的"[续传] 指令 / 入口综合文本"注入设计
     // user message 用纯用户原始内容 — 上下文已由 history + continuationMessages(assistant tool_calls + tool 结果) 完整承载
@@ -778,8 +1003,9 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
 
     const contRequest: StreamChatRequestLike = {
       ...chatRequest,
+	  appendCurrentUser: false,
       eventName: contEventName,
-      message: nextMessage,
+	  message: nextMessage,
       continuationMessages,
     };
 
@@ -807,8 +1033,12 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
 
     try {
       devLog.i(LOG, 'streamChatAPI(cont) call', { contEventName });
-      await streamChatAPI(contRequest);
+      const continuationRequest = streamChatAPI(contRequest);
+      // 调用已同步发起；事件流期间可能合法触发下一轮工具续传，不能一直持锁到流结束。
+      waitingForContinuationRef.current = false;
+      await continuationRequest;
     } catch (error) {
+      waitingForContinuationRef.current = false;
       if (!isMountedRef.current) return;
       devLog.e(LOG, 'streamChatAPI(cont) failed', { error: String(error) });
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -857,6 +1087,12 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
       };
       continuationRoundsRef.current = 0;
       continuationTranscriptRef.current = [];
+	  providerTranscriptRef.current = [];
+      executedToolFingerprintsRef.current.clear();
+      stagnantContinuationRoundsRef.current = 0;
+      lastContinuationFingerprintRef.current = '';
+      waitingForContinuationRef.current = false;
+	  providerUsageReceivedRef.current = false;
       snapshottedToolCallCountRef.current = 0;
       snapshottedResultCountRef.current = 0;
       currentVersionRef.current = continuationVersionRef.current;
@@ -901,6 +1137,9 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         result?: any;
         cacheRead?: number;
         cacheCreation?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
         hitRate?: number;
         costCny?: number;
         // P2-1: dispatch 阶段化事件字段
@@ -922,6 +1161,9 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         toolId?: string;
         // 2026-07-07: 后端携带的 anchor, 用于精确穿插到 content 中
         precedingContentLen?: number;
+		contentBlock?: Record<string, unknown>;
+		contentBlockIndex?: number;
+		reasoningDetails?: Array<Record<string, unknown>>;
       }) => {
         if (!isMountedRef.current) return;
         if (data.done) {
@@ -946,20 +1188,68 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
         // 必须在每条 event 入口都检查(不能用一次性 flag,否则会因 done 事件重复触发)
         if (!data.done) onFirstChunk?.();
 
+    // 原始 assistant 推理元数据不进入可见文本，但必须保存用于工具续传和下一轮历史。
+    if (data.type === 'assistant_metadata') {
+      if (data.reasoningDetails?.length) {
+      reasoningDetailsRef.current.push(...data.reasoningDetails.map((item) => ({ ...item })));
+      }
+      if (typeof data.contentBlockIndex === 'number' && data.contentBlock) {
+      const index = data.contentBlockIndex;
+      const patch = data.contentBlock;
+      const patchType = String(patch.type ?? '');
+      // input_json_delta 由已校验的 ToolCall 参数替换，其他块保留原始位置。
+      if (patchType !== 'input_json_delta') {
+        const prev = providerContentBlocksRef.current.get(index) ?? {};
+        const next = { ...prev };
+        if (patchType === 'thinking_delta') {
+        next.type = 'thinking';
+        next.thinking = `${String(prev.thinking ?? '')}${String(patch.thinking ?? '')}`;
+        } else if (patchType === 'signature_delta') {
+        next.type = 'thinking';
+        next.signature = `${String(prev.signature ?? '')}${String(patch.signature ?? '')}`;
+        } else if (patchType === 'text_delta') {
+        next.type = 'text';
+        next.text = `${String(prev.text ?? '')}${String(patch.text ?? '')}`;
+        } else {
+        Object.assign(next, patch);
+        }
+        providerContentBlocksRef.current.set(index, next);
+      }
+      }
+      updateMessage(convId, assistantMsgId, {
+      providerContentBlocks: Array.from(providerContentBlocksRef.current.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, block]) => ({ ...block })),
+      reasoningDetails: reasoningDetailsRef.current.map((item) => ({ ...item })),
+      });
+      return;
+    }
+
         // --- 缓存命中事件 ---
-        if (data.type === 'cache_usage' && (data.cacheRead || data.cacheCreation)) {
+		if (
+		  data.type === 'cache_usage' &&
+		  (data.cacheRead || data.cacheCreation || data.inputTokens || data.outputTokens)
+		) {
           const read = data.cacheRead ?? 0;
           const create = data.cacheCreation ?? 0;
+		  const providerInput = data.inputTokens ?? 0;
+		  const providerOutput = data.outputTokens ?? 0;
           const cost = data.costCny ?? 0;
+		  providerUsageReceivedRef.current = true;
           setTokenStats((prev: any) => {
             const newRead = prev.cacheReadTokens + read;
             const newCreate = prev.cacheCreationTokens + create;
-            const totalInput = newRead + prev.inputTokens;
+			const newInput = prev.inputTokens + providerInput;
+			const newOutput = prev.outputTokens + providerOutput;
+			const totalInput = newRead + newCreate + newInput;
             const rate = totalInput > 0 ? newRead / totalInput : 0;
             return {
               ...prev,
               cacheReadTokens: newRead,
               cacheCreationTokens: newCreate,
+			  inputTokens: newInput,
+			  outputTokens: newOutput,
+			  totalTokens: newInput + newRead + newCreate + newOutput,
               lastTurnCacheRead: read,
               hitRate: rate,
               totalCostCny: prev.totalCostCny + cost,
@@ -1198,14 +1488,18 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
             currentProgressPercentRef.current = 25;
             writeProgress(convId, 'analyzing', 25, '分析问题...');
           }
-          if (fullContentRef.current.length + data.content.length > useSettingsStore.getState().streamingMaxLength) {
-            fullContentRef.current += data.content;
+          const maxLen = useSettingsStore.getState().streamingMaxLength;
+          if (fullContentRef.current.length + data.content.length > maxLen) {
+            // B4 (2026-09-06): 精确截断到 max,避免整块追加导致最终内容超限一个 chunk 大小
+            const remaining = maxLen - fullContentRef.current.length;
+            const clipped = remaining > 0 ? data.content.slice(0, remaining) : '';
+            fullContentRef.current += clipped;
             streamingContentRef.current = fullContentRef.current;
             // P3: 原生 tool_call 路径下 content 不再含 XML, 直接累积
-            originalAiContentRef.current += data.content;
+            originalAiContentRef.current += clipped;
             scheduleStreamingRawUpdate(originalAiContentRef.current);
             updateMessage(convId, assistantMsgId, { content: fullContentRef.current });
-            onFeedback?.(`响应过长已自动停止（超过 ${useSettingsStore.getState().streamingMaxLength} 字符限制）`);
+            onFeedback?.(`响应过长已自动停止（超过 ${maxLen} 字符限制）`);
             onAgentNodesFinalize?.(true);
             stopStreaming();
             return;
@@ -1241,10 +1535,26 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
             return;
           }
 
-          updateMessage(convId, assistantMsgId, {
+      const persistedTranscript = providerTranscriptRef.current.length > 0
+      ? [
+        ...providerTranscriptRef.current,
+        ...(originalAiContentRef.current.slice(lastAssistantTextLenRef.current) || providerContentBlocksRef.current.size > 0
+          ? [{
+            content: originalAiContentRef.current.slice(lastAssistantTextLenRef.current),
+            providerContentBlocks: Array.from(providerContentBlocksRef.current.entries())
+              .sort(([a], [b]) => a - b)
+              .map(([, block]) => ({ ...block })),
+            reasoningDetails: reasoningDetailsRef.current.map((item) => ({ ...item })),
+            role: 'assistant' as const,
+          }]
+          : []),
+      ]
+      : undefined;
+      updateMessage(convId, assistantMsgId, {
             content: fullContentRef.current,
             // P3: 写入原始 AI 输出,不含 tool_result 注入 + sanitize 替换
             rawContent: originalAiContentRef.current,
+      providerTranscript: persistedTranscript,
           });
           // 完成时重置冲刷计数器
           flushCharsAccum.current = 0;
@@ -1258,9 +1568,14 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
           })(fullContentRef.current);
           let computedStats: any = null;
           setTokenStats((prev: any) => {
-            const newInput = prev.inputTokens + inputTokens;
-            const newOutput = prev.outputTokens + finalOutputTokens;
-            const newTotal = newInput + newOutput;
+      const hasProviderUsage = providerUsageReceivedRef.current;
+      const newInput = prev.inputTokens + (hasProviderUsage ? 0 : inputTokens);
+      const newOutput = prev.outputTokens + (hasProviderUsage ? 0 : finalOutputTokens);
+      const newTotal =
+        newInput +
+        newOutput +
+        prev.cacheReadTokens +
+        prev.cacheCreationTokens;
             const newStats = {
               inputTokens: newInput,
               outputTokens: newOutput,
@@ -1329,6 +1644,11 @@ export function useStreamingSession(ctx: StreamingContext, cb: StreamingSessionC
     activeHandlerRef.current = null;
     continuationRoundsRef.current = 0;
     continuationTranscriptRef.current = [];
+  	providerTranscriptRef.current = [];
+    executedToolFingerprintsRef.current.clear();
+    stagnantContinuationRoundsRef.current = 0;
+    lastContinuationFingerprintRef.current = '';
+    waitingForContinuationRef.current = false;
     snapshottedToolCallCountRef.current = 0;
     snapshottedResultCountRef.current = 0;
   }, []);

@@ -7,7 +7,6 @@ import {
   DialogTitle,
 } from '@/components/ui/Dialog';
 import { useToolConfirmStore } from '@/stores/toolConfirmStore';
-import { useToolPermissionStore } from '@/stores/toolPermissionStore';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useCallback } from 'react';
 
@@ -17,7 +16,8 @@ import { useCallback } from 'react';
  * 行为:
  *   - 订阅 useToolConfirmStore.pending + batched
  *   - AI 并发 N 个工具调用时,合并到同一次确认,弹窗标题显示 "X 个工具"
- *   - 用户操作后,resolveAll 一次性应用到所有 batched(避免链式 deny 误伤)
+ *   - deny 整批终止;allow-* 仅作用于当前展示的工具(allow-always 连同同工具排队请求一并放行),
+ *     其余工具保持排队逐个询问,防止「点一个弹窗放行整批混合工具」的权限提升
  *   - 关闭弹窗(ESC/外部点击) = 全部拒绝
  */
 export function ToolConfirmDialog() {
@@ -26,14 +26,8 @@ export function ToolConfirmDialog() {
 
   const handleResolveAll = useCallback(
     (action: 'allow-always' | 'allow-once' | 'deny') => {
-      const state = useToolConfirmStore.getState();
-      if (action === 'allow-always') {
-        // 始终允许:对 batched 中每个不同工具名都改 auto
-        const distinctTools = new Set(state.batched.map((r) => r.toolName));
-        const permSetter = useToolPermissionStore.getState().setPermission;
-        distinctTools.forEach((toolName) => permSetter(toolName, 'auto'));
-      }
-      state.resolveAll(action);
+      // 权限持久化(allow-always → auto)由 registry 在收到结果后处理;弹窗只负责转发用户选择
+      useToolConfirmStore.getState().resolveAll(action);
     },
     [],
   );
@@ -95,7 +89,9 @@ export function ToolConfirmDialog() {
               <AlertTriangle className="mt-0.5 h-[14px] w-[14px] shrink-0" />
               <span>
                 写入/删除类操作不可撤销，请确认操作对象正确后再允许
-                {batchedCount > 1 ? '；本批所有工具将统一应用你的选择' : ''}
+                {batchedCount > 1
+                  ? '；拒绝会应用于本批全部，允许仅作用于当前展示的工具'
+                  : ''}
               </span>
             </div>
           </div>

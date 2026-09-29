@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { X, FileText, Loader2, AlertCircle } from 'lucide-react';
+import { X, FileText, Loader2, AlertCircle, MessageSquarePlus } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import { readFileContent } from '@/lib/fs/project-file-service';
@@ -25,11 +25,13 @@ interface FilePreviewProps {
   filePath: string;
   /** 关闭预览(由 FileTreeSidebar 控制) */
   onClose: () => void;
+  /** 将当前文件引用插入聊天输入框。 */
+  onInsert?: (path: string) => void;
 }
 
 const MAX_PREVIEW_BYTES = 200 * 1024; // 200KB 上限, 防止 1GB 日志卡死 WebView
 
-export function FilePreview({ filePath, onClose }: FilePreviewProps) {
+export function FilePreview({ filePath, onClose, onInsert }: FilePreviewProps) {
   const [content, setContent] = useState<null | string>(null);
   const [error, setError] = useState<null | string>(null);
   const [truncated, setTruncated] = useState(false);
@@ -68,19 +70,33 @@ export function FilePreview({ filePath, onClose }: FilePreviewProps) {
 
   // 短名(取 basename)
   const fileName = filePath.split(/[/\\]/).pop() || filePath;
+	const directoryPath = filePath.slice(0, Math.max(0, filePath.length - fileName.length)).replace(/[\\/]$/, '');
 
   return (
     <div className="border-border/40 bg-card flex h-full min-h-0 flex-col rounded-md border">
       {/* 头部 */}
       <div className="border-border/40 flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
         <FileText className="text-muted-foreground h-[12px] w-[12px] shrink-0" />
-        <span
-          className="text-foreground/80 flex-1 truncate font-mono text-xs font-medium"
-          title={filePath}
-        >
-          {fileName}
-        </span>
+    <div className="min-w-0 flex-1" title={filePath}>
+      <span className="text-foreground/80 block truncate font-mono text-xs font-medium">
+      {fileName}
+      </span>
+      {directoryPath && (
+      <span className="text-muted-foreground block truncate font-mono text-[10px]">
+        {directoryPath}
+      </span>
+      )}
+    </div>
         <Button
+      aria-label="插入聊天"
+      className="text-muted-foreground hover:text-foreground h-6 w-6"
+      onClick={() => onInsert?.(filePath)}
+      size="icon"
+      title="插入聊天上下文"
+      variant="ghost">
+      <MessageSquarePlus className="h-[12px] w-[12px]" />
+    </Button>
+    <Button
           aria-label="关闭预览"
           className="text-muted-foreground hover:text-foreground h-6 w-6"
           onClick={onClose}
